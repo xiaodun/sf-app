@@ -28,7 +28,14 @@ export default function RootLayout() {
           headerBackVisible: true, // 全局默认显示返回箭头
         }}
       >
-        <Stack.Screen name="index" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="index"
+          options={{
+            headerShown: true,
+            headerBackVisible: false,
+            headerLeft: () => null, // 彻底隐藏返回按钮
+          }}
+        />
       </Stack>
       <StatusBar style="auto" />
     </ThemeProvider>
