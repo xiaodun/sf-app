@@ -17,11 +17,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
-import {
-  FavoriteUnit,
-  loadFavoriteUnits,
-  saveFavoriteUnits,
-} from "@/utils/storage";
+import { useUnifiedData } from "@/hooks/useUnifiedData";
+import { DataAdapter } from "@/utils/dataAdapter";
+import { FavoriteUnit } from "@/utils/storage";
 import { MaterialIcons } from "@expo/vector-icons";
 
 export default function FavoriteScreen() {
@@ -29,6 +27,13 @@ export default function FavoriteScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { dataManager, data, loading: dataLoading } = useUnifiedData();
+  const adapterRef = React.useRef<DataAdapter | null>(null);
+  if (!adapterRef.current) {
+    adapterRef.current = new DataAdapter(dataManager);
+  }
+  const adapter = adapterRef.current;
+
   const [favoriteUnits, setFavoriteUnits] = useState<FavoriteUnit[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -57,34 +62,25 @@ export default function FavoriteScreen() {
 
   // 加载收藏数据
   const loadData = useCallback(async () => {
-    if (!id) {
+    if (!id || dataLoading) {
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      const data = await loadFavoriteUnits(id);
+      const data = adapter.getFavoriteUnits(id);
       setFavoriteUnits(data);
     } catch (error) {
       console.error("加载收藏数据失败:", error);
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, dataLoading, adapter]);
 
   // 首次加载数据
   useEffect(() => {
     loadData();
   }, [loadData]);
-
-  // 保存收藏数据
-  useEffect(() => {
-    if (!loading && id) {
-      saveFavoriteUnits(id, favoriteUnits).catch((error) => {
-        console.error("保存收藏数据失败:", error);
-      });
-    }
-  }, [favoriteUnits, loading, id]);
 
   // 取消收藏
   const handleUnfavorite = useCallback((unitId: string) => {
@@ -232,4 +228,3 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 });
-
