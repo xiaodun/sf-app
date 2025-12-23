@@ -28,24 +28,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
+import { useUnifiedData } from "@/hooks/useUnifiedData";
+import { DataAdapter } from "@/utils/dataAdapter";
 import {
   FavoriteUnit,
   Feature,
   Level,
-  loadFavoriteUnits,
-  loadFeatures,
-  loadLevels,
-  loadLevelsByCollectionId,
-  loadRecommendedUnits,
-  loadTrashedUnits,
-  loadUnitFeatures,
   RecommendedUnit,
-  saveFavoriteUnits,
-  saveFeatures,
-  saveLevels,
-  saveRecommendedUnits,
-  saveTrashedUnits,
-  saveUnitFeatures,
   TrashedUnit,
   Unit,
   UnitFeature,
@@ -120,6 +109,113 @@ const DraggableUnit = ({
   );
 };
 
+// 可拖拽排序的层次组件
+const DraggableLevel = ({
+  level,
+  index,
+  onDragStart,
+  onDragEnd,
+  onDragUpdate,
+  draggedIndex,
+  dragTranslationY,
+  itemHeight,
+}: {
+  level: Level;
+  index: number;
+  onDragStart: (index: number) => void;
+  onDragEnd: (fromIndex: number, toIndex: number) => void;
+  onDragUpdate: (fromIndex: number, translationY: number) => void;
+  draggedIndex: number | null;
+  dragTranslationY: number;
+  itemHeight: number;
+}) => {
+  const translateY = useSharedValue(0);
+  const offsetY = useSharedValue(0);
+  const opacity = useSharedValue(1);
+  const scale = useSharedValue(1);
+  const isDragging = draggedIndex === index;
+  const totalItemHeight = itemHeight + 12; // item高度 + marginBottom
+
+  // 当拖拽位置变化时，更新其他项的偏移
+  // 只移动相邻的元素，其他元素不动
+  // 例如：1 2 3，拖动1向下
+  // - 当1的目标位置 >= 2的位置时，2需要向上移动到1的位置
+  // - 当1的目标位置 < 2的位置时，2不需要移动
+  React.useEffect(() => {
+    if (draggedIndex !== null && draggedIndex !== index) {
+      const targetIndex =
+        Math.round(dragTranslationY / totalItemHeight) + draggedIndex;
+
+      // 只处理相邻元素的交换
+      if (draggedIndex < index) {
+        // 被拖拽项在当前位置之前（向下拖动）
+        // 只有当目标位置 >= 当前项位置时，当前项才需要向上移动
+        if (targetIndex >= index) {
+          offsetY.value = withSpring(-totalItemHeight);
+        } else {
+          offsetY.value = withSpring(0);
+        }
+      } else if (draggedIndex > index) {
+        // 被拖拽项在当前位置之后（向上拖动）
+        // 只有当目标位置 <= 当前项位置时，当前项才需要向下移动
+        if (targetIndex <= index) {
+          offsetY.value = withSpring(totalItemHeight);
+        } else {
+          offsetY.value = withSpring(0);
+        }
+      } else {
+        offsetY.value = withSpring(0);
+      }
+    } else {
+      offsetY.value = withSpring(0);
+    }
+  }, [draggedIndex, dragTranslationY, index, totalItemHeight, offsetY]);
+
+  const panGesture = Gesture.Pan()
+    .onStart(() => {
+      translateY.value = 0;
+      offsetY.value = 0;
+      opacity.value = 0.8;
+      scale.value = 1.05;
+      onDragStart(index);
+    })
+    .onUpdate((e) => {
+      translateY.value = e.translationY;
+      onDragUpdate(index, e.translationY);
+    })
+    .onEnd(() => {
+      // 计算目标位置
+      const targetIndex =
+        Math.round(translateY.value / totalItemHeight) + index;
+      translateY.value = withSpring(0);
+      offsetY.value = withSpring(0);
+      opacity.value = withSpring(1);
+      scale.value = withSpring(1);
+      onDragEnd(index, targetIndex);
+    })
+    .minDistance(5);
+
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [
+        { translateY: isDragging ? translateY.value : offsetY.value },
+        { scale: scale.value },
+      ],
+      opacity: opacity.value,
+      zIndex: isDragging ? 1000 : 1,
+    };
+  });
+
+  return (
+    <GestureDetector gesture={panGesture}>
+      <Animated.View style={[styles.sortableLevelItem, animatedStyle]}>
+        <MaterialIcons name="drag-handle" size={24} color="#999999" />
+        <ThemedText style={styles.sortableLevelName}>{level.name}</ThemedText>
+      </Animated.View>
+    </GestureDetector>
+  );
+};
+
 export default function CollectionDetailScreen() {
   const { id, name, createdAt } = useLocalSearchParams<{
     id: string;
@@ -128,6 +224,18 @@ export default function CollectionDetailScreen() {
   }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const {
+    dataManager,
+    data,
+    loading: dataLoading,
+    updateData,
+  } = useUnifiedData();
+  const adapterRef = React.useRef<DataAdapter | null>(null);
+  if (!adapterRef.current) {
+    adapterRef.current = new DataAdapter(dataManager);
+  }
+  const adapter = adapterRef.current;
+
   const [collection, setCollection] = useState<Collection | null>(null);
   const [activeTab, setActiveTab] = useState<"level" | "recommend">("level");
   const [showMoreTabs, setShowMoreTabs] = useState(false);
@@ -168,6 +276,13 @@ export default function CollectionDetailScreen() {
   const [currentFeatureForPicker, setCurrentFeatureForPicker] =
     useState<Feature | null>(null);
   const [unitFeatures, setUnitFeatures] = useState<UnitFeature[]>([]);
+  const [editingUnitName, setEditingUnitName] = useState<string>("");
+  const [unitNameError, setUnitNameError] = useState<string>("");
+  const [levelNameError, setLevelNameError] = useState("");
+  const [isSortingMode, setIsSortingMode] = useState(false);
+  const [draggedLevelIndex, setDraggedLevelIndex] = useState<number | null>(
+    null
+  );
 
   // 加载集合信息
   useEffect(() => {
@@ -182,24 +297,17 @@ export default function CollectionDetailScreen() {
 
   // 加载数据的函数
   const loadData = useCallback(async () => {
-    if (id) {
+    if (id && !dataLoading) {
       setLoading(true);
       try {
-        const [
-          loadedLevels,
-          allFeatures,
-          loadedUnitFeatures,
-          loadedRecommendedUnits,
-          loadedTrashedUnits,
-          loadedFavoriteUnits,
-        ] = await Promise.all([
-          loadLevelsByCollectionId(id),
-          loadFeatures(), // 加载所有特性（包括全局特性）
-          loadUnitFeatures(),
-          loadRecommendedUnits(id),
-          loadTrashedUnits(id),
-          loadFavoriteUnits(id),
-        ]);
+        // 使用适配器加载数据
+        const loadedLevels = adapter.getLevelsByCollectionId(id);
+        const allFeatures = adapter.getFeaturesByCollectionId(id);
+        const loadedUnitFeatures = adapter.getUnitFeatures();
+        const loadedRecommendedUnits = adapter.getRecommendedUnits(id);
+        const loadedTrashedUnits = adapter.getTrashedUnits(id);
+        const loadedFavoriteUnits = adapter.getFavoriteUnits(id);
+
         setLevels(loadedLevels);
         // 只使用全局特性（collectionId 为 "global"），并去重
         const globalFeatures = allFeatures.filter(
@@ -220,7 +328,7 @@ export default function CollectionDetailScreen() {
         setLoading(false);
       }
     }
-  }, [id]);
+  }, [id, dataLoading, adapter]);
 
   // 加载层级列表和特性
   useEffect(() => {
@@ -272,102 +380,189 @@ export default function CollectionDetailScreen() {
     }, 0);
   }, []);
 
-  // 保存层级数据
+  // 使用 ref 跟踪是否正在更新，避免无限循环
+  const isUpdatingRef = React.useRef(false);
+  const lastSyncDataRef = React.useRef<string>("");
+
+  // 同步数据到统一数据结构
   useEffect(() => {
-    if (!loading && id) {
-      // 加载所有层级，更新当前集合的层级，然后保存
-      loadLevels()
-        .then((allLevels) => {
-          // 过滤掉当前集合的旧层级
-          const otherLevels = allLevels.filter(
-            (level) => level.collectionId !== id
-          );
-          // 合并其他集合的层级和当前集合的新层级
-          const updatedLevels = [...otherLevels, ...levels];
-          return saveLevels(updatedLevels);
-        })
-        .catch((error) => {
-          console.error("保存层级数据失败:", error);
+    if (!loading && !dataLoading && id && !isUpdatingRef.current) {
+      const collectionIndex = dataManager.getCollectionIndexById(id);
+      if (collectionIndex === -1) return;
+
+      // 创建当前状态的快照用于比较
+      const currentStateSnapshot = JSON.stringify({
+        levels,
+        features,
+        unitFeatures,
+        recommendedUnits,
+        trashedUnits,
+        favoriteUnits,
+      });
+
+      // 如果数据没有变化，跳过同步
+      if (currentStateSnapshot === lastSyncDataRef.current) {
+        return;
+      }
+
+      isUpdatingRef.current = true;
+      lastSyncDataRef.current = currentStateSnapshot;
+
+      try {
+        // 将levels转换为新数据结构中的层次
+        const newLevels = levels.map((level) => {
+          // 获取该层次的所有单元（包括推荐、回收站、收藏的）
+          const levelUnits = level.units.map((unit) => {
+            // 查找单元的特性值
+            const unitFeatureValues = unitFeatures
+              .filter((uf) => uf.unitId === unit.id)
+              .map((uf) => ({
+                featureId: uf.featureId,
+                value: uf.value,
+              }));
+
+            // 确定单元状态
+            let status: "normal" | "recommended" | "favorite" | "trash" =
+              "normal";
+            let favoriteReason: string | undefined;
+            let favoriteCreatedAt: number | undefined;
+
+            const favoriteUnit = favoriteUnits.find(
+              (fu) => fu.unit.id === unit.id && fu.levelId === level.id
+            );
+            const recommendedUnit = recommendedUnits.find(
+              (ru) => ru.unit.id === unit.id && ru.levelId === level.id
+            );
+            const trashedUnit = trashedUnits.find(
+              (tu) => tu.unit.id === unit.id && tu.levelId === level.id
+            );
+
+            if (favoriteUnit) {
+              status = "favorite";
+              favoriteReason = favoriteUnit.reason;
+              favoriteCreatedAt = favoriteUnit.createdAt;
+            } else if (recommendedUnit) {
+              status = "recommended";
+            } else if (trashedUnit) {
+              status = "trash";
+            }
+
+            return {
+              id: unit.id,
+              name: unit.name,
+              status,
+              features: unitFeatureValues,
+              ...(favoriteReason && { favoriteReason }),
+              ...(favoriteCreatedAt && { favoriteCreatedAt }),
+            };
+          });
+
+          return {
+            id: level.id,
+            name: level.name,
+            identifier: level.identifier,
+            units: levelUnits,
+            createdAt: level.createdAt,
+          };
         });
-    }
-  }, [levels, loading, id]);
 
-  // 保存特性数据
-  useEffect(() => {
-    if (!loading && id) {
-      loadFeatures()
-        .then((allFeatures) => {
-          const otherFeatures = allFeatures.filter(
-            (feature) => feature.collectionId !== id
-          );
-          const updatedFeatures = [...otherFeatures, ...features];
-          return saveFeatures(updatedFeatures);
-        })
-        .catch((error) => {
-          console.error("保存特性数据失败:", error);
+        // 更新集合（保留集合元数据，只更新层次）
+        const collection = dataManager.getCollection(collectionIndex);
+        if (collection) {
+          dataManager.updateCollection(collectionIndex, {
+            ...collection,
+            levels: newLevels,
+          });
+        }
+
+        // 更新特性（只更新全局特性）
+        features.forEach((feature) => {
+          if (feature.collectionId === "global") {
+            const existingFeature = dataManager.getFeature(feature.id);
+            if (!existingFeature) {
+              dataManager.addFeature({
+                id: feature.id,
+                name: feature.name,
+                type: feature.type,
+                createdAt: feature.createdAt,
+              });
+            } else {
+              dataManager.updateFeature(feature.id, {
+                id: feature.id,
+                name: feature.name,
+                type: feature.type,
+                createdAt: feature.createdAt,
+              });
+            }
+          }
         });
-    }
-  }, [features, loading, id]);
 
-  // 保存单元特性数据
-  useEffect(() => {
-    if (!loading && id) {
-      saveUnitFeatures(unitFeatures).catch((error) => {
-        console.error("保存单元特性数据失败:", error);
-      });
+        // 保存数据（异步执行，避免阻塞）
+        updateData()
+          .catch((error) => {
+            console.error("保存数据失败:", error);
+          })
+          .finally(() => {
+            // 延迟重置标志，避免立即触发新的同步
+            setTimeout(() => {
+              isUpdatingRef.current = false;
+            }, 100);
+          });
+      } catch (error) {
+        console.error("同步数据失败:", error);
+        isUpdatingRef.current = false;
+      }
     }
-  }, [unitFeatures, loading, id]);
-
-  // 保存推荐单元数据
-  useEffect(() => {
-    if (!loading && id) {
-      saveRecommendedUnits(id, recommendedUnits).catch((error) => {
-        console.error("保存推荐单元数据失败:", error);
-      });
-    }
-  }, [recommendedUnits, loading, id]);
-
-  // 保存回收站单元数据
-  useEffect(() => {
-    if (!loading && id) {
-      saveTrashedUnits(id, trashedUnits).catch((error) => {
-        console.error("保存回收站单元数据失败:", error);
-      });
-    }
-  }, [trashedUnits, loading, id]);
-
-  // 保存收藏单元数据
-  useEffect(() => {
-    if (!loading && id) {
-      saveFavoriteUnits(id, favoriteUnits).catch((error) => {
-        console.error("保存收藏单元数据失败:", error);
-      });
-    }
-  }, [favoriteUnits, loading, id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    levels,
+    features,
+    unitFeatures,
+    recommendedUnits,
+    trashedUnits,
+    favoriteUnits,
+    loading,
+    dataLoading,
+    id,
+  ]);
 
   const handleCreateLevel = () => {
     if (levelName.trim() && id) {
+      const trimmedName = levelName.trim();
+
+      // 检查名称是否重复
+      const isDuplicate = levels.some((l) => l.name === trimmedName);
+
+      if (isDuplicate) {
+        setLevelNameError("层级名称不能重复");
+        return;
+      }
+
+      setLevelNameError("");
+
       const newLevel: Level = {
         id: Date.now().toString(),
         collectionId: id,
-        name: levelName.trim(),
+        name: trimmedName,
         identifier: identifierType,
         units: modalUnits,
         createdAt: Date.now(),
       };
       setLevels((prev) => [...prev, newLevel]);
       setLevelName("");
+      setLevelNameError("");
       setIdentifierType("numeric");
       setModalUnits([]);
       setEditingLevelId(null);
       setModalVisible(false);
     } else {
-      Alert.alert("错误", "请输入层级名称");
+      setLevelNameError("请输入层级名称");
     }
   };
 
   const handleEditLevel = (level: Level) => {
     setLevelName(level.name);
+    setLevelNameError("");
     setIdentifierType(level.identifier as "numeric" | "alpha");
     setModalUnits([...level.units]);
     setEditingLevelId(level.id);
@@ -376,6 +571,20 @@ export default function CollectionDetailScreen() {
 
   const handleUpdateLevel = () => {
     if (levelName.trim() && editingLevelId) {
+      const trimmedName = levelName.trim();
+
+      // 检查名称是否重复（排除当前编辑的层级）
+      const isDuplicate = levels.some(
+        (l) => l.name === trimmedName && l.id !== editingLevelId
+      );
+
+      if (isDuplicate) {
+        setLevelNameError("层级名称不能重复");
+        return;
+      }
+
+      setLevelNameError("");
+
       const oldLevel = levels.find((l) => l.id === editingLevelId);
       const oldUnitIds = oldLevel?.units.map((u) => u.id) || [];
       const newUnitIds = modalUnits.map((u) => u.id);
@@ -424,7 +633,7 @@ export default function CollectionDetailScreen() {
           level.id === editingLevelId
             ? {
                 ...level,
-                name: levelName.trim(),
+                name: trimmedName,
                 identifier: identifierType,
                 units: modalUnits,
               }
@@ -452,12 +661,13 @@ export default function CollectionDetailScreen() {
         })
       );
       setLevelName("");
+      setLevelNameError("");
       setIdentifierType("numeric");
       setModalUnits([]);
       setEditingLevelId(null);
       setModalVisible(false);
     } else {
-      Alert.alert("错误", "请输入层级名称");
+      setLevelNameError("请输入层级名称");
     }
   };
 
@@ -522,6 +732,8 @@ export default function CollectionDetailScreen() {
     levelId?: string
   ) => {
     setEditingUnitId(unit.id);
+    setEditingUnitName(unit.name);
+    setUnitNameError("");
     // 如果提供了层级信息（从推荐页面调用），直接使用
     if (levelName && levelId) {
       setCurrentUnitForFavorite({
@@ -558,6 +770,111 @@ export default function CollectionDetailScreen() {
     setEditingUnitId(null);
     setCurrentUnitForFavorite(null);
     setFavoriteReason("");
+    setEditingUnitName("");
+    setUnitNameError("");
+  };
+
+  // 验证单元名称是否重复
+  const validateUnitName = (unitName: string, unitId: string): boolean => {
+    if (!unitName.trim()) {
+      setUnitNameError("单元名称不能为空");
+      return false;
+    }
+
+    if (!currentUnitForFavorite) {
+      return true;
+    }
+
+    const level = levels.find((l) => l.id === currentUnitForFavorite.levelId);
+    if (!level) {
+      return true;
+    }
+
+    // 检查同一层次中是否有其他单元使用相同名称（排除当前编辑的单元）
+    const duplicateUnit = level.units.find(
+      (u) => u.id !== unitId && u.name.trim() === unitName.trim()
+    );
+
+    if (duplicateUnit) {
+      setUnitNameError("该名称已被使用，请使用其他名称");
+      return false;
+    }
+
+    setUnitNameError("");
+    return true;
+  };
+
+  // 保存单元编辑（统一保存名称和特性）
+  const handleSaveUnitEdit = () => {
+    if (!editingUnitId || !editingUnitName.trim()) {
+      Alert.alert("错误", "请输入单元名称");
+      return;
+    }
+
+    if (!validateUnitName(editingUnitName.trim(), editingUnitId)) {
+      return;
+    }
+
+    // 更新单元名称
+    const level = levels.find((l) =>
+      l.units.some((u) => u.id === editingUnitId)
+    );
+    if (level) {
+      setLevels((prev) =>
+        prev.map((l) =>
+          l.id === level.id
+            ? {
+                ...l,
+                units: l.units.map((u) =>
+                  u.id === editingUnitId
+                    ? { ...u, name: editingUnitName.trim() }
+                    : u
+                ),
+              }
+            : l
+        )
+      );
+    }
+
+    // 同时更新推荐、回收站、收藏中的单元名称
+    setRecommendedUnits((prev) =>
+      prev.map((item) =>
+        item.unit.id === editingUnitId
+          ? {
+              ...item,
+              unit: { ...item.unit, name: editingUnitName.trim() },
+            }
+          : item
+      )
+    );
+
+    setTrashedUnits((prev) =>
+      prev.map((item) =>
+        item.unit.id === editingUnitId
+          ? {
+              ...item,
+              unit: { ...item.unit, name: editingUnitName.trim() },
+            }
+          : item
+      )
+    );
+
+    setFavoriteUnits((prev) =>
+      prev.map((item) =>
+        item.unit.id === editingUnitId
+          ? {
+              ...item,
+              unit: { ...item.unit, name: editingUnitName.trim() },
+            }
+          : item
+      )
+    );
+
+    // 关闭Modal
+    setEditingUnitId(null);
+    setCurrentUnitForFavorite(null);
+    setEditingUnitName("");
+    setUnitNameError("");
   };
 
   // 重置集合：将推荐和回收站的所有单元归位到对应的层级
@@ -750,6 +1067,65 @@ export default function CollectionDetailScreen() {
     setFavoriteReason("");
   };
 
+  const [dragTranslationY, setDragTranslationY] = useState(0);
+
+  // 处理层次拖拽开始
+  const handleLevelDragStart = (index: number) => {
+    setDraggedLevelIndex(index);
+    setDragTranslationY(0);
+  };
+
+  // 处理层次拖拽更新
+  const handleLevelDragUpdate = useCallback(
+    (fromIndex: number, translationY: number) => {
+      setDragTranslationY(translationY);
+    },
+    []
+  );
+
+  // 处理层次拖拽结束
+  const handleLevelDragEnd = useCallback(
+    (fromIndex: number, toIndex: number) => {
+      setDraggedLevelIndex(null);
+      setDragTranslationY(0);
+      const maxIndex = levels.length - 1;
+      const validToIndex = Math.max(0, Math.min(toIndex, maxIndex));
+
+      if (fromIndex !== validToIndex && id) {
+        setLevels((prev) => {
+          const newLevels = [...prev];
+          const [movedLevel] = newLevels.splice(fromIndex, 1);
+          newLevels.splice(validToIndex, 0, movedLevel);
+
+          // 更新dataManager
+          const collectionIndex = dataManager
+            .getCollections()
+            .findIndex((c) => c.id === id);
+          if (collectionIndex !== -1) {
+            const collection = dataManager.getCollection(collectionIndex);
+            if (collection) {
+              dataManager.updateCollection(collectionIndex, {
+                ...collection,
+                levels: newLevels,
+              });
+              // 异步保存
+              updateData();
+            }
+          }
+
+          return newLevels;
+        });
+      }
+    },
+    [levels, id, dataManager, updateData]
+  );
+
+  // 退出排序模式
+  const handleExitSortingMode = () => {
+    setIsSortingMode(false);
+    setDraggedLevelIndex(null);
+  };
+
   // Stack.Screen 必须在组件顶层，确保始终渲染
   // 使用 key 确保每次渲染时都更新配置
   return (
@@ -772,21 +1148,40 @@ export default function CollectionDetailScreen() {
           ),
           headerRight: () => {
             return (
-              <Pressable
-                style={[
-                  styles.headerButton,
-                  refreshButtonPressed && { opacity: 0.6 },
-                ]}
-                onPress={handleRefreshPress}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                android_ripple={{ color: "#007AFF20" }}
-              >
-                <MaterialIcons
-                  name="refresh"
-                  size={24}
-                  color={refreshButtonPressed ? "#0051D5" : "#007AFF"}
-                />
-              </Pressable>
+              <View style={styles.headerButtons}>
+                {activeTab === "level" && (
+                  <Pressable
+                    style={[
+                      styles.headerButton,
+                      isSortingMode && styles.headerButtonActive,
+                    ]}
+                    onPress={() => setIsSortingMode(!isSortingMode)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    android_ripple={{ color: "#007AFF20" }}
+                  >
+                    <MaterialIcons
+                      name="sort"
+                      size={24}
+                      color={isSortingMode ? "#0051D5" : "#007AFF"}
+                    />
+                  </Pressable>
+                )}
+                <Pressable
+                  style={[
+                    styles.headerButton,
+                    refreshButtonPressed && { opacity: 0.6 },
+                  ]}
+                  onPress={handleRefreshPress}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  android_ripple={{ color: "#007AFF20" }}
+                >
+                  <MaterialIcons
+                    name="refresh"
+                    size={24}
+                    color={refreshButtonPressed ? "#0051D5" : "#007AFF"}
+                  />
+                </Pressable>
+              </View>
             );
           },
         }}
@@ -798,224 +1193,266 @@ export default function CollectionDetailScreen() {
       ) : (
         <View style={[styles.container, { paddingTop: insets.top }]}>
           {/* Tab 切换 */}
-          <View
-            style={styles.tabContainerWrapper}
-            onLayout={(e) => {
-              setTabContainerHeight(e.nativeEvent.layout.height);
-            }}
-          >
-            <View style={styles.tabContainer}>
-              <Pressable
-                style={[styles.tab, activeTab === "level" && styles.tabActive]}
-                onPress={() => {
-                  setActiveTab("level");
-                  setShowMoreTabs(false);
-                }}
-              >
-                <ThemedText
-                  style={[
-                    styles.tabText,
-                    activeTab === "level" && styles.tabTextActive,
-                  ]}
-                >
-                  层级
-                </ThemedText>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.tab,
-                  activeTab === "recommend" && styles.tabActive,
-                ]}
-                onPress={() => {
-                  setActiveTab("recommend");
-                  setShowMoreTabs(false);
-                }}
-              >
-                <ThemedText
-                  style={[
-                    styles.tabText,
-                    activeTab === "recommend" && styles.tabTextActive,
-                  ]}
-                >
-                  推荐
-                </ThemedText>
-              </Pressable>
-              <Pressable
-                style={styles.moreTab}
-                onPress={() => setShowMoreTabs(!showMoreTabs)}
-              >
-                <MaterialIcons
-                  name="more-vert"
-                  size={20}
-                  color={showMoreTabs ? "#007AFF" : "#666666"}
-                />
-              </Pressable>
-            </View>
-
-            {/* 下拉的 Tab 面板 */}
-            {showMoreTabs && (
-              <>
+          {!isSortingMode && (
+            <View
+              style={styles.tabContainerWrapper}
+              onLayout={(e) => {
+                setTabContainerHeight(e.nativeEvent.layout.height);
+              }}
+            >
+              <View style={styles.tabContainer}>
                 <Pressable
-                  style={styles.dropdownOverlay}
-                  onPress={() => setShowMoreTabs(false)}
-                />
-                <View
                   style={[
-                    styles.dropdownTabsContainer,
-                    { top: tabContainerHeight },
+                    styles.tab,
+                    activeTab === "level" && styles.tabActive,
                   ]}
+                  onPress={() => {
+                    setActiveTab("level");
+                    setShowMoreTabs(false);
+                    setIsSortingMode(false);
+                  }}
                 >
-                  <Pressable
-                    style={styles.dropdownTab}
-                    onPress={() => {
-                      setShowMoreTabs(false);
-                      router.push({
-                        pathname: `/collection/${id}/favorite` as any,
-                        params: { collectionName: collection.name },
-                      });
-                    }}
+                  <ThemedText
+                    style={[
+                      styles.tabText,
+                      activeTab === "level" && styles.tabTextActive,
+                    ]}
                   >
-                    <ThemedText style={styles.dropdownTabText}>收藏</ThemedText>
-                  </Pressable>
-                  <Pressable
-                    style={styles.dropdownTab}
-                    onPress={() => {
-                      setShowMoreTabs(false);
-                      router.push({
-                        pathname: `/collection/${id}/trash` as any,
-                        params: { collectionName: collection.name },
-                      });
-                    }}
+                    层级
+                  </ThemedText>
+                </Pressable>
+                <Pressable
+                  style={[
+                    styles.tab,
+                    activeTab === "recommend" && styles.tabActive,
+                  ]}
+                  onPress={() => {
+                    setActiveTab("recommend");
+                    setShowMoreTabs(false);
+                    setIsSortingMode(false);
+                  }}
+                >
+                  <ThemedText
+                    style={[
+                      styles.tabText,
+                      activeTab === "recommend" && styles.tabTextActive,
+                    ]}
                   >
-                    <ThemedText style={styles.dropdownTabText}>
-                      回收站
-                    </ThemedText>
-                  </Pressable>
-                </View>
-              </>
-            )}
-          </View>
+                    推荐
+                  </ThemedText>
+                </Pressable>
+                <Pressable
+                  style={styles.moreTab}
+                  onPress={() => setShowMoreTabs(!showMoreTabs)}
+                >
+                  <MaterialIcons
+                    name="more-vert"
+                    size={20}
+                    color={showMoreTabs ? "#007AFF" : "#666666"}
+                  />
+                </Pressable>
+              </View>
 
-          {/* 内容区域 */}
+              {/* 下拉的 Tab 面板 */}
+              {showMoreTabs && !isSortingMode && (
+                <>
+                  <Pressable
+                    style={styles.dropdownOverlay}
+                    onPress={() => setShowMoreTabs(false)}
+                  />
+                  <View
+                    style={[
+                      styles.dropdownTabsContainer,
+                      { top: tabContainerHeight },
+                    ]}
+                  >
+                    <Pressable
+                      style={styles.dropdownTab}
+                      onPress={() => {
+                        setShowMoreTabs(false);
+                        router.push({
+                          pathname: `/collection/${id}/favorite` as any,
+                          params: { collectionName: collection.name },
+                        });
+                      }}
+                    >
+                      <ThemedText style={styles.dropdownTabText}>
+                        收藏
+                      </ThemedText>
+                    </Pressable>
+                    <Pressable
+                      style={styles.dropdownTab}
+                      onPress={() => {
+                        setShowMoreTabs(false);
+                        router.push({
+                          pathname: `/collection/${id}/trash` as any,
+                          params: { collectionName: collection.name },
+                        });
+                      }}
+                    >
+                      <ThemedText style={styles.dropdownTabText}>
+                        回收站
+                      </ThemedText>
+                    </Pressable>
+                  </View>
+                </>
+              )}
+            </View>
+          )}
+
           <ScrollView
             style={styles.content}
             contentContainerStyle={[
               styles.contentContainer,
-              { paddingBottom: insets.bottom + 100 },
+              {
+                paddingBottom: isSortingMode
+                  ? insets.bottom + 80
+                  : insets.bottom + 100,
+              },
             ]}
             showsVerticalScrollIndicator={false}
           >
             {activeTab === "level" ? (
               <>
-                {levels.length === 0 ? (
-                  <ThemedView style={styles.emptyState}>
-                    <ThemedText style={styles.emptyStateText}>
-                      暂无层级，点击下方按钮创建第一个层级
-                    </ThemedText>
-                  </ThemedView>
+                {isSortingMode ? (
+                  <>
+                    {levels.length === 0 ? (
+                      <ThemedView style={styles.emptyState}>
+                        <ThemedText style={styles.emptyStateText}>
+                          暂无层级
+                        </ThemedText>
+                      </ThemedView>
+                    ) : (
+                      <>
+                        {levels.map((level, index) => (
+                          <DraggableLevel
+                            key={level.id}
+                            level={level}
+                            index={index}
+                            onDragStart={handleLevelDragStart}
+                            onDragEnd={handleLevelDragEnd}
+                            onDragUpdate={handleLevelDragUpdate}
+                            draggedIndex={draggedLevelIndex}
+                            dragTranslationY={dragTranslationY}
+                            itemHeight={60}
+                          />
+                        ))}
+                      </>
+                    )}
+                  </>
                 ) : (
-                  levels.map((level) => (
-                    <View key={level.id} style={styles.levelItem}>
-                      <View style={styles.levelHeader}>
-                        <View style={styles.levelTitleContainer}>
-                          <ThemedText style={styles.levelName}>
-                            {level.name}
-                          </ThemedText>
-                        </View>
-                        <View style={styles.levelActions}>
-                          <Pressable
-                            style={({ pressed }) => [
-                              styles.iconButton,
-                              pressed && styles.iconButtonPressed,
-                            ]}
-                            onPress={() => handleEditLevel(level)}
-                          >
-                            <MaterialIcons
-                              name="edit"
-                              size={20}
-                              color="#007AFF"
-                            />
-                          </Pressable>
-                          <Pressable
-                            style={({ pressed }) => [
-                              styles.iconButton,
-                              pressed && styles.iconButtonPressed,
-                            ]}
-                            onPress={() => handleDeleteLevel(level.id)}
-                          >
-                            <MaterialIcons
-                              name="delete"
-                              size={20}
-                              color="#FF3B30"
-                            />
-                          </Pressable>
-                        </View>
-                      </View>
-                      {level.units && level.units.length > 0 && (
-                        <View style={styles.unitsContainer}>
-                          {level.units
-                            .filter(
-                              (unit) =>
-                                !isUnitInRecommended(unit.id) &&
-                                !isUnitInTrash(unit.id)
-                            )
-                            .map((unit) => (
-                              <DraggableUnit
-                                key={unit.id}
-                                unit={unit}
-                                levelId={level.id}
-                                levelName={level.name}
-                                onDoublePress={() =>
-                                  handleUnitDoublePress(unit)
-                                }
-                                onMoveToRecommend={() => {
-                                  // 不删除单元，只添加到推荐列表
-                                  setRecommendedUnits((prev) => {
-                                    // 检查是否已存在，避免重复
-                                    const exists = prev.some(
-                                      (item) => item.unit.id === unit.id
-                                    );
-                                    if (exists) {
-                                      return prev;
+                  <>
+                    {levels.length === 0 ? (
+                      <ThemedView style={styles.emptyState}>
+                        <ThemedText style={styles.emptyStateText}>
+                          暂无层级，点击下方按钮创建第一个层级
+                        </ThemedText>
+                      </ThemedView>
+                    ) : (
+                      levels.map((level) => (
+                        <View key={level.id} style={styles.levelItem}>
+                          <View style={styles.levelHeader}>
+                            <View style={styles.levelTitleContainer}>
+                              <ThemedText style={styles.levelName}>
+                                {level.name}
+                              </ThemedText>
+                            </View>
+                            <View style={styles.levelActions}>
+                              <Pressable
+                                style={({ pressed }) => [
+                                  styles.iconButton,
+                                  pressed && styles.iconButtonPressed,
+                                ]}
+                                onPress={() => handleEditLevel(level)}
+                              >
+                                <MaterialIcons
+                                  name="edit"
+                                  size={20}
+                                  color="#007AFF"
+                                />
+                              </Pressable>
+                              <Pressable
+                                style={({ pressed }) => [
+                                  styles.iconButton,
+                                  pressed && styles.iconButtonPressed,
+                                ]}
+                                onPress={() => handleDeleteLevel(level.id)}
+                              >
+                                <MaterialIcons
+                                  name="delete"
+                                  size={20}
+                                  color="#FF3B30"
+                                />
+                              </Pressable>
+                            </View>
+                          </View>
+                          {level.units && level.units.length > 0 && (
+                            <View style={styles.unitsContainer}>
+                              {level.units
+                                .filter(
+                                  (unit) =>
+                                    !isUnitInRecommended(unit.id) &&
+                                    !isUnitInTrash(unit.id)
+                                )
+                                .map((unit) => (
+                                  <DraggableUnit
+                                    key={unit.id}
+                                    unit={unit}
+                                    levelId={level.id}
+                                    levelName={level.name}
+                                    onDoublePress={() =>
+                                      handleUnitDoublePress(unit)
                                     }
-                                    return [
-                                      ...prev,
-                                      {
-                                        unit,
-                                        levelName: level.name,
-                                        levelId: level.id,
-                                        collectionId: id || "",
-                                      },
-                                    ];
-                                  });
-                                }}
-                                onMoveToTrash={() => {
-                                  // 不删除单元，只添加到回收站
-                                  setTrashedUnits((prev) => {
-                                    // 检查是否已存在，避免重复
-                                    const exists = prev.some(
-                                      (item) => item.unit.id === unit.id
-                                    );
-                                    if (exists) {
-                                      return prev;
-                                    }
-                                    return [
-                                      ...prev,
-                                      {
-                                        unit,
-                                        levelName: level.name,
-                                        levelId: level.id,
-                                        collectionId: id || "",
-                                      },
-                                    ];
-                                  });
-                                }}
-                              />
-                            ))}
+                                    onMoveToRecommend={() => {
+                                      // 不删除单元，只添加到推荐列表
+                                      setRecommendedUnits((prev) => {
+                                        // 检查是否已存在，避免重复
+                                        const exists = prev.some(
+                                          (item) => item.unit.id === unit.id
+                                        );
+                                        if (exists) {
+                                          return prev;
+                                        }
+                                        return [
+                                          ...prev,
+                                          {
+                                            unit,
+                                            levelName: level.name,
+                                            levelId: level.id,
+                                            collectionId: id || "",
+                                          },
+                                        ];
+                                      });
+                                    }}
+                                    onMoveToTrash={() => {
+                                      // 不删除单元，只添加到回收站
+                                      setTrashedUnits((prev) => {
+                                        // 检查是否已存在，避免重复
+                                        const exists = prev.some(
+                                          (item) => item.unit.id === unit.id
+                                        );
+                                        if (exists) {
+                                          return prev;
+                                        }
+                                        return [
+                                          ...prev,
+                                          {
+                                            unit,
+                                            levelName: level.name,
+                                            levelId: level.id,
+                                            collectionId: id || "",
+                                          },
+                                        ];
+                                      });
+                                    }}
+                                  />
+                                ))}
+                            </View>
+                          )}
                         </View>
-                      )}
-                    </View>
-                  ))
+                      ))
+                    )}
+                  </>
                 )}
               </>
             ) : activeTab === "recommend" ? (
@@ -1131,8 +1568,27 @@ export default function CollectionDetailScreen() {
             ) : null}
           </ScrollView>
 
+          {/* 完成排序按钮（固定在底部） */}
+          {isSortingMode && (
+            <View
+              style={[
+                styles.exitSortingButtonContainer,
+                { paddingBottom: insets.bottom + 16 },
+              ]}
+            >
+              <TouchableOpacity
+                style={styles.exitSortingButton}
+                onPress={handleExitSortingMode}
+              >
+                <ThemedText style={styles.exitSortingButtonText}>
+                  完成排序
+                </ThemedText>
+              </TouchableOpacity>
+            </View>
+          )}
+
           {/* 创建按钮（仅在层级 tab 显示） */}
-          {activeTab === "level" && (
+          {activeTab === "level" && !isSortingMode && (
             <View
               style={[
                 styles.bottomContainer,
@@ -1145,6 +1601,7 @@ export default function CollectionDetailScreen() {
                 style={styles.createButton}
                 onPress={() => {
                   setLevelName("");
+                  setLevelNameError("");
                   setIdentifierType("numeric");
                   setModalUnits([]);
                   setEditingLevelId(null);
@@ -1180,12 +1637,26 @@ export default function CollectionDetailScreen() {
               </ThemedText>
 
               <TextInput
-                style={styles.textInput}
+                style={[
+                  styles.textInput,
+                  levelNameError && styles.textInputError,
+                ]}
                 placeholder="请输入层级名称"
                 value={levelName}
-                onChangeText={setLevelName}
+                onChangeText={(text) => {
+                  setLevelName(text);
+                  // 清除错误提示
+                  if (levelNameError) {
+                    setLevelNameError("");
+                  }
+                }}
                 autoFocus={true}
               />
+              {levelNameError ? (
+                <ThemedText style={styles.errorText}>
+                  {levelNameError}
+                </ThemedText>
+              ) : null}
 
               <View style={styles.identifierContainer}>
                 <ThemedText style={styles.identifierLabel}>
@@ -1317,6 +1788,7 @@ export default function CollectionDetailScreen() {
                 onPress={() => {
                   setModalVisible(false);
                   setLevelName("");
+                  setLevelNameError("");
                   setIdentifierType("numeric");
                   setModalUnits([]);
                   setEditingLevelId(null);
@@ -1482,8 +1954,35 @@ export default function CollectionDetailScreen() {
               showsVerticalScrollIndicator={true}
             >
               <ThemedText type="subtitle" style={styles.modalTitle}>
-                编辑单元特性
+                编辑单元
               </ThemedText>
+
+              {/* 单元名称编辑 */}
+              <TextInput
+                style={[
+                  styles.textInput,
+                  unitNameError && styles.unitNameInputError,
+                ]}
+                placeholder="请输入单元名称"
+                value={editingUnitName}
+                onChangeText={(text) => {
+                  setEditingUnitName(text);
+                  if (unitNameError) {
+                    setUnitNameError("");
+                  }
+                }}
+                onBlur={() => {
+                  if (editingUnitId && editingUnitName.trim()) {
+                    validateUnitName(editingUnitName.trim(), editingUnitId);
+                  }
+                }}
+                autoFocus={true}
+              />
+              {unitNameError ? (
+                <ThemedText style={styles.unitNameErrorText}>
+                  {unitNameError}
+                </ThemedText>
+              ) : null}
 
               {features.length === 0 ? (
                 <ThemedText style={styles.emptyStateText}>
@@ -1606,7 +2105,7 @@ export default function CollectionDetailScreen() {
               )}
             </ScrollView>
 
-            <ThemedView style={styles.unitEditButtonContainer}>
+            <ThemedView style={styles.unitEditButtonWrapper}>
               {editingUnitId && currentUnitForFavorite && (
                 <Pressable
                   style={[
@@ -1642,12 +2141,21 @@ export default function CollectionDetailScreen() {
                   </ThemedText>
                 </Pressable>
               )}
-              <TouchableOpacity
-                style={[styles.unitEditButton, styles.unitEditCloseButton]}
-                onPress={handleCancelUnitEdit}
-              >
-                <ThemedText style={styles.unitEditButtonText}>关闭</ThemedText>
-              </TouchableOpacity>
+              <ThemedView style={styles.buttonContainer}>
+                <TouchableOpacity
+                  style={[styles.button, styles.cancelButton]}
+                  onPress={handleCancelUnitEdit}
+                >
+                  <ThemedText style={styles.cancelButtonText}>取消</ThemedText>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.button, styles.confirmButton]}
+                  onPress={handleSaveUnitEdit}
+                >
+                  <ThemedText style={styles.confirmButtonText}>保存</ThemedText>
+                </TouchableOpacity>
+              </ThemedView>
             </ThemedView>
           </ThemedView>
         </ThemedView>
@@ -1678,7 +2186,7 @@ export default function CollectionDetailScreen() {
                 nestedScrollEnabled={true}
               >
                 <View style={styles.pickerDropdownGrid}>
-                  {[0, ...Array.from({ length: 20 }, (_, i) => i + 1)].map(
+                  {[0, ...Array.from({ length: 30 }, (_, i) => i + 1)].map(
                     (num) => {
                       const currentValue = getUnitFeatureValue(
                         editingUnitId || "",
@@ -1775,12 +2283,20 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#F5F5F5",
   },
+  headerButtons: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
   headerButton: {
     padding: 8,
     minWidth: 44,
     minHeight: 44,
     justifyContent: "center",
     alignItems: "center",
+  },
+  headerButtonActive: {
+    backgroundColor: "#E3F2FD",
+    borderRadius: 8,
   },
   loadingText: {
     fontSize: 16,
@@ -1974,17 +2490,17 @@ const styles = StyleSheet.create({
     minHeight: 44,
     minWidth: 60,
   },
-  unitEditButtonContainer: {
-    flexDirection: "row",
-    gap: 12,
+  unitEditButtonWrapper: {
     padding: 16,
     borderTopWidth: 1,
     borderTopColor: "#E0E0E0",
     backgroundColor: "#FFFFFF",
+    gap: 12,
   },
   favoriteButtonInModal: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     gap: 6,
     paddingVertical: 12,
     paddingHorizontal: 16,
@@ -1992,8 +2508,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#F5F5F5",
     borderWidth: 1,
     borderColor: "#E0E0E0",
-    flex: 1,
-    justifyContent: "center",
+    width: "100%",
+    marginBottom: 8,
   },
   favoriteButtonInModalActive: {
     backgroundColor: "#FFF8E1",
@@ -2006,22 +2522,6 @@ const styles = StyleSheet.create({
   },
   favoriteButtonTextActive: {
     color: "#FFA500",
-  },
-  unitEditButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 44,
-  },
-  unitEditCloseButton: {
-    backgroundColor: "#007AFF",
-  },
-  unitEditButtonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "600",
   },
   unitName: {
     fontSize: 16,
@@ -2338,6 +2838,106 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "600",
   },
+  modalSubtitle: {
+    marginTop: 24,
+    marginBottom: 16,
+    color: "#000000",
+    fontSize: 18,
+    fontWeight: "600",
+  },
+  unitNameInputError: {
+    borderColor: "#FF3B30",
+  },
+  unitNameErrorText: {
+    fontSize: 14,
+    color: "#FF3B30",
+    marginTop: -20,
+    marginBottom: 4,
+  },
+  sortingHint: {
+    backgroundColor: "#E3F2FD",
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+    alignItems: "center",
+  },
+  sortingHintText: {
+    fontSize: 14,
+    color: "#007AFF",
+    fontWeight: "500",
+  },
+  sortableLevelItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 12,
+    gap: 12,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
+  },
+  sortableLevelName: {
+    flex: 1,
+    fontSize: 17,
+    fontWeight: "600",
+    color: "#000000",
+    lineHeight: 24,
+  },
+  exitSortingButtonContainer: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#E0E0E0",
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 8,
+      },
+    }),
+  },
+  exitSortingButton: {
+    backgroundColor: "#007AFF",
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    ...Platform.select({
+      ios: {
+        shadowColor: "#007AFF",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 4,
+      },
+    }),
+  },
+  exitSortingButtonText: {
+    color: "#FFFFFF",
+    fontSize: 17,
+    fontWeight: "600",
+  },
   textInput: {
     borderWidth: 1,
     borderColor: "#E0E0E0",
@@ -2345,9 +2945,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     fontSize: 16,
-    marginBottom: 24,
+    marginBottom: 8,
     backgroundColor: "#FFFFFF",
     minHeight: 44,
+  },
+  textInputError: {
+    borderColor: "#FF3B30",
+  },
+  errorText: {
+    color: "#FF3B30",
+    fontSize: 14,
+    marginBottom: 16,
+    marginTop: -8,
   },
   buttonContainer: {
     flexDirection: "row",
