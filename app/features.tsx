@@ -1,6 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { Stack, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Alert,
   Dimensions,
@@ -17,11 +17,25 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
-import { Feature, loadFeatures, saveFeatures } from "@/utils/storage";
+import { useUnifiedData } from "@/hooks/useUnifiedData";
+import { DataAdapter } from "@/utils/dataAdapter";
+import { Feature } from "@/utils/storage";
 
 export default function FeaturesScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const {
+    dataManager,
+    data,
+    loading: dataLoading,
+    updateData,
+  } = useUnifiedData();
+  const adapterRef = React.useRef<DataAdapter | null>(null);
+  if (!adapterRef.current) {
+    adapterRef.current = new DataAdapter(dataManager);
+  }
+  const adapter = adapterRef.current;
+
   const [features, setFeatures] = useState<Feature[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
@@ -30,12 +44,14 @@ export default function FeaturesScreen() {
     "numeric"
   );
   const [editingFeatureId, setEditingFeatureId] = useState<string | null>(null);
+  const [featureNameError, setFeatureNameError] = useState("");
 
   // 加载特性列表
   useEffect(() => {
-    const loadData = async () => {
+    if (!dataLoading) {
       try {
-        const allFeatures = await loadFeatures();
+        // 使用适配器加载全局特性
+        const allFeatures = adapter.getFeaturesByCollectionId("global");
         // 只加载全局特性（collectionId 为 "global"）
         const globalFeatures = allFeatures.filter(
           (f) => f.collectionId === "global"
@@ -50,47 +66,113 @@ export default function FeaturesScreen() {
       } finally {
         setLoading(false);
       }
-    };
-    loadData();
-  }, []);
-
-  // 保存特性数据（确保所有特性都是全局特性）
-  useEffect(() => {
-    if (!loading) {
-      // 确保所有特性都是全局特性
-      const globalFeatures = features.map((f) => ({
-        ...f,
-        collectionId: "global", // 强制设置为全局特性
-      }));
-
-      // 直接保存全局特性，因为所有特性都是全局特性
-      saveFeatures(globalFeatures).catch((error) => {
-        console.error("保存特性数据失败:", error);
-      });
     }
-  }, [features, loading]);
+  }, [dataLoading, adapter]);
 
-  const handleCreateFeature = () => {
+  // 使用 ref 跟踪是否正在更新，避免无限循环
+  const isUpdatingRef = React.useRef(false);
+  const lastSyncFeaturesRef = React.useRef<string>("");
+
+  // 同步特性数据到统一数据结构
+  useEffect(() => {
+    if (!loading && !dataLoading && !isUpdatingRef.current) {
+      // 创建当前状态的快照用于比较
+      const currentFeaturesSnapshot = JSON.stringify(features);
+
+      // 如果数据没有变化，跳过同步
+      if (currentFeaturesSnapshot === lastSyncFeaturesRef.current) {
+        return;
+      }
+
+      isUpdatingRef.current = true;
+      lastSyncFeaturesRef.current = currentFeaturesSnapshot;
+
+      try {
+        // 更新所有特性到统一数据结构
+        features.forEach((feature) => {
+          if (feature.collectionId === "global") {
+            const existingFeature = dataManager.getFeature(feature.id);
+            if (!existingFeature) {
+              dataManager.addFeature({
+                id: feature.id,
+                name: feature.name,
+                type: feature.type,
+                createdAt: feature.createdAt,
+              });
+            } else {
+              dataManager.updateFeature(feature.id, {
+                id: feature.id,
+                name: feature.name,
+                type: feature.type,
+                createdAt: feature.createdAt,
+              });
+            }
+          }
+        });
+
+        // 保存数据（异步执行，避免阻塞）
+        updateData()
+          .catch((error) => {
+            console.error("保存特性数据失败:", error);
+          })
+          .finally(() => {
+            // 延迟重置标志，避免立即触发新的同步
+            setTimeout(() => {
+              isUpdatingRef.current = false;
+            }, 100);
+          });
+      } catch (error) {
+        console.error("同步特性数据失败:", error);
+        isUpdatingRef.current = false;
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [features, loading, dataLoading]);
+
+  const handleCreateFeature = async () => {
     if (featureName.trim()) {
-      const newFeature: Feature = {
-        id: Date.now().toString(),
-        collectionId: "global", // 全局特性
-        name: featureName.trim(),
-        type: featureType,
-        createdAt: Date.now(),
-      };
-      setFeatures((prev) => [...prev, newFeature]);
-      setFeatureName("");
-      setFeatureType("numeric");
-      setEditingFeatureId(null);
-      setModalVisible(false);
+      const trimmedName = featureName.trim();
+
+      // 检查名称是否重复
+      const isDuplicate = features.some(
+        (f) =>
+          f.name === trimmedName &&
+          (!editingFeatureId || f.id !== editingFeatureId)
+      );
+
+      if (isDuplicate) {
+        setFeatureNameError("特性名称不能重复");
+        return;
+      }
+
+      setFeatureNameError("");
+
+      try {
+        const newFeature: Feature = {
+          id: Date.now().toString(),
+          collectionId: "global", // 全局特性
+          name: trimmedName,
+          type: featureType,
+          createdAt: Date.now(),
+        };
+        setFeatures((prev) => [...prev, newFeature]);
+        setFeatureName("");
+        setFeatureNameError("");
+        setFeatureType("numeric");
+        setEditingFeatureId(null);
+        setModalVisible(false);
+      } catch (error) {
+        console.error("创建特性失败:", error);
+        Alert.alert("错误", "创建特性失败，请重试");
+      }
     } else {
-      Alert.alert("错误", "请输入特性名称");
+      setFeatureNameError("请输入特性名称");
     }
   };
 
   const handleEditFeature = (feature: Feature) => {
     setFeatureName(feature.name);
+    setFeatureNameError("");
     setFeatureType(feature.type);
     setEditingFeatureId(feature.id);
     setModalVisible(true);
@@ -98,29 +180,54 @@ export default function FeaturesScreen() {
 
   const handleUpdateFeature = () => {
     if (featureName.trim() && editingFeatureId) {
+      const trimmedName = featureName.trim();
+
+      // 检查名称是否重复
+      const isDuplicate = features.some(
+        (f) => f.name === trimmedName && f.id !== editingFeatureId
+      );
+
+      if (isDuplicate) {
+        setFeatureNameError("特性名称不能重复");
+        return;
+      }
+
+      setFeatureNameError("");
+
       setFeatures((prev) =>
         prev.map((feature) =>
           feature.id === editingFeatureId
             ? {
                 ...feature,
                 collectionId: "global", // 确保更新后仍然是全局特性
-                name: featureName.trim(),
+                name: trimmedName,
                 type: featureType,
               }
             : feature
         )
       );
       setFeatureName("");
+      setFeatureNameError("");
       setFeatureType("numeric");
       setEditingFeatureId(null);
       setModalVisible(false);
     } else {
-      Alert.alert("错误", "请输入特性名称");
+      setFeatureNameError("请输入特性名称");
     }
   };
 
-  const handleDeleteFeature = (featureId: string) => {
-    setFeatures((prev) => prev.filter((item) => item.id !== featureId));
+  const handleDeleteFeature = async (featureId: string) => {
+    try {
+      // 使用统一数据管理器删除特性（会自动清理所有引用）
+      dataManager.removeFeature(featureId);
+      // 更新本地状态
+      setFeatures((prev) => prev.filter((item) => item.id !== featureId));
+      // 保存数据
+      await updateData();
+    } catch (error) {
+      console.error("删除特性失败:", error);
+      Alert.alert("错误", "删除特性失败，请重试");
+    }
   };
 
   // Stack.Screen 必须在组件顶层，确保始终渲染
@@ -247,12 +354,26 @@ export default function FeaturesScreen() {
               </ThemedText>
 
               <TextInput
-                style={styles.textInput}
+                style={[
+                  styles.textInput,
+                  featureNameError && styles.textInputError,
+                ]}
                 placeholder="请输入特性名称"
                 value={featureName}
-                onChangeText={setFeatureName}
+                onChangeText={(text) => {
+                  setFeatureName(text);
+                  // 清除错误提示
+                  if (featureNameError) {
+                    setFeatureNameError("");
+                  }
+                }}
                 autoFocus={true}
               />
+              {featureNameError ? (
+                <ThemedText style={styles.errorText}>
+                  {featureNameError}
+                </ThemedText>
+              ) : null}
 
               <View style={styles.identifierContainer}>
                 <ThemedText style={styles.identifierLabel}>类型：</ThemedText>
@@ -520,9 +641,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     fontSize: 16,
-    marginBottom: 24,
+    marginBottom: 8,
     backgroundColor: "#FFFFFF",
     minHeight: 44,
+  },
+  textInputError: {
+    borderColor: "#FF3B30",
+  },
+  errorText: {
+    color: "#FF3B30",
+    fontSize: 14,
+    marginBottom: 16,
+    marginTop: -8,
   },
   identifierContainer: {
     marginBottom: 24,
