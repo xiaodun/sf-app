@@ -1,6 +1,6 @@
 import { useNavigation } from "@react-navigation/native";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Platform,
   Pressable,
@@ -12,7 +12,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
-import { TrashedUnit, loadTrashedUnits } from "@/utils/storage";
+import { useUnifiedData } from "@/hooks/useUnifiedData";
+import { DataAdapter } from "@/utils/dataAdapter";
+import { TrashedUnit } from "@/utils/storage";
 import { MaterialIcons } from "@expo/vector-icons";
 
 export default function TrashScreen() {
@@ -22,24 +24,31 @@ export default function TrashScreen() {
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { dataManager, data, loading: dataLoading } = useUnifiedData();
+  const adapterRef = React.useRef<DataAdapter | null>(null);
+  if (!adapterRef.current) {
+    adapterRef.current = new DataAdapter(dataManager);
+  }
+  const adapter = adapterRef.current;
+
   const [trashedUnits, setTrashedUnits] = useState<TrashedUnit[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadData = useCallback(async () => {
-    if (!id) {
+    if (!id || dataLoading) {
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      const data = await loadTrashedUnits(id);
+      const data = adapter.getTrashedUnits(id);
       setTrashedUnits(data);
     } catch (error) {
       console.error("加载回收站数据失败:", error);
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, dataLoading, adapter]);
 
   // 首次加载数据
   useEffect(() => {
