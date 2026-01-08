@@ -37,6 +37,12 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "780675aa-af40-4958-aef1-46d5217e7f24"
+      }
+    },
+    "owner": "xiaodun"
   }
 }

@@ -1,0 +1,2 @@
+Using EAS CLI without version control system is not recommended, use this mode only if you know what you are doing.
+^C
