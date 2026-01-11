@@ -68,6 +68,7 @@ const DraggableUnit = ({
 
   const tapGesture = Gesture.Tap()
     .numberOfTaps(2)
+    .maxDuration(300)
     .onEnd(() => {
       onDoublePress();
     });
