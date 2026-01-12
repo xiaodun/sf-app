@@ -432,6 +432,16 @@ export default function HomeScreen() {
               <Pressable
                 style={styles.headerButton}
                 onPress={() => {
+                  router.push("/debug");
+                }}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                android_ripple={{ color: "#007AFF20" }}
+              >
+                <MaterialIcons name="bug-report" size={24} color="#FF9500" />
+              </Pressable>
+              <Pressable
+                style={styles.headerButton}
+                onPress={() => {
                   router.push("/features");
                 }}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}

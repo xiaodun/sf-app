@@ -6,6 +6,7 @@ import {
   useRouter,
 } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
+import { debugLogger, logError, logInfo, logWarn, logDebug } from "@/utils/debugLogger";
 import {
   Alert,
   Dimensions,
@@ -69,27 +70,75 @@ const DraggableUnit = ({
   const tapGesture = Gesture.Tap()
     .numberOfTaps(2)
     .maxDuration(300)
+    .onBegin(() => {
+      logDebug("Gesture", `双击手势开始 - 单元: ${unit.name}`, {
+        unitId: unit.id,
+        levelId,
+        levelName,
+      });
+    })
     .onEnd(() => {
-      onDoublePress();
+      logInfo("Gesture", `双击手势触发 - 单元: ${unit.name}`, {
+        unitId: unit.id,
+        levelId,
+        levelName,
+      });
+      try {
+        onDoublePress();
+      } catch (error) {
+        logError("Gesture", "双击处理失败", { unitId: unit.id }, error as Error);
+      }
+    })
+    .onFinalize(() => {
+      logDebug("Gesture", `双击手势结束 - 单元: ${unit.name}`);
     });
 
   const panGesture = Gesture.Pan()
     .onStart(() => {
+      logDebug("Gesture", `拖动手势开始 - 单元: ${unit.name}`, {
+        unitId: unit.id,
+        levelId,
+        levelName,
+      });
       translateY.value = 0;
     })
     .onUpdate((e) => {
       translateY.value = e.translationY;
+      logDebug("Gesture", `拖动手势更新 - 单元: ${unit.name}`, {
+        translationY: e.translationY,
+        velocityY: e.velocityY,
+      });
     })
     .onEnd((e) => {
       const translationY = e.translationY;
-      if (translationY < -DRAG_THRESHOLD) {
-        // 向上拖动，进入推荐
-        onMoveToRecommend();
-      } else if (translationY > DRAG_THRESHOLD) {
-        // 向下拖动，进入回收站
-        onMoveToTrash();
+      logInfo("Gesture", `拖动手势结束 - 单元: ${unit.name}`, {
+        translationY,
+        velocityY: e.velocityY,
+        threshold: DRAG_THRESHOLD,
+      });
+      
+      try {
+        if (translationY < -DRAG_THRESHOLD) {
+          // 向上拖动，进入推荐
+          logInfo("Gesture", `向上拖动到推荐 - 单元: ${unit.name}`);
+          onMoveToRecommend();
+        } else if (translationY > DRAG_THRESHOLD) {
+          // 向下拖动，进入回收站
+          logInfo("Gesture", `向下拖动到回收站 - 单元: ${unit.name}`);
+          onMoveToTrash();
+        } else {
+          logDebug("Gesture", `拖动距离不足，取消操作 - 单元: ${unit.name}`, {
+            translationY,
+            threshold: DRAG_THRESHOLD,
+          });
+        }
+        translateY.value = withSpring(0);
+      } catch (error) {
+        logError("Gesture", "拖动处理失败", { unitId: unit.id, translationY }, error as Error);
       }
-      translateY.value = withSpring(0);
+    })
+    .onFinalize(() => {
+      logDebug("Gesture", `拖动手势结束 - 单元: ${unit.name}`);
     })
     .minDistance(10);
 
@@ -174,25 +223,54 @@ const DraggableLevel = ({
 
   const panGesture = Gesture.Pan()
     .onStart(() => {
+      logInfo("LevelSort", `层级拖拽开始 - ${level.name}`, {
+        levelId: level.id,
+        index,
+      });
       translateY.value = 0;
       offsetY.value = 0;
       opacity.value = 0.8;
       scale.value = 1.05;
-      onDragStart(index);
+      try {
+        onDragStart(index);
+      } catch (error) {
+        logError("LevelSort", "拖拽开始处理失败", { levelId: level.id, index }, error as Error);
+      }
     })
     .onUpdate((e) => {
       translateY.value = e.translationY;
-      onDragUpdate(index, e.translationY);
+      logDebug("LevelSort", `层级拖拽更新 - ${level.name}`, {
+        translationY: e.translationY,
+        velocityY: e.velocityY,
+      });
+      try {
+        onDragUpdate(index, e.translationY);
+      } catch (error) {
+        logError("LevelSort", "拖拽更新处理失败", { levelId: level.id, index }, error as Error);
+      }
     })
     .onEnd(() => {
       // 计算目标位置
       const targetIndex =
         Math.round(translateY.value / totalItemHeight) + index;
+      logInfo("LevelSort", `层级拖拽结束 - ${level.name}`, {
+        fromIndex: index,
+        toIndex: targetIndex,
+        translationY: translateY.value,
+        totalItemHeight,
+      });
       translateY.value = withSpring(0);
       offsetY.value = withSpring(0);
       opacity.value = withSpring(1);
       scale.value = withSpring(1);
-      onDragEnd(index, targetIndex);
+      try {
+        onDragEnd(index, targetIndex);
+      } catch (error) {
+        logError("LevelSort", "拖拽结束处理失败", { levelId: level.id, index, targetIndex }, error as Error);
+      }
+    })
+    .onFinalize(() => {
+      logDebug("LevelSort", `层级拖拽完成 - ${level.name}`);
     })
     .minDistance(5);
 
