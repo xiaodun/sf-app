@@ -82,6 +82,7 @@ export default function DebugScreen() {
       <Stack.Screen
         options={{
           title: "调试日志",
+          headerBackVisible: false, // 禁用默认返回按钮
           headerLeft: () => (
             <TouchableOpacity
               onPress={() => router.back()}

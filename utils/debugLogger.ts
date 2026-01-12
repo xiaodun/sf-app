@@ -1,5 +1,5 @@
-import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
 
 // 动态导入 expo-file-system，避免在 Web 平台报错
 let FileSystem: any = null;
@@ -28,8 +28,10 @@ class DebugLogger {
   private logsLoaded = false; // 标记是否已加载过日志
 
   constructor() {
-    // 延迟加载日志，避免在初始化时就加载
-    // this.loadLogs(); // 改为在需要时才加载
+    // 初始化时就加载日志
+    this.loadLogs().catch((error) => {
+      console.error("加载日志失败:", error);
+    });
     // 捕获全局错误
     if (typeof ErrorUtils !== "undefined") {
       const originalHandler = ErrorUtils.getGlobalHandler();
@@ -54,17 +56,18 @@ class DebugLogger {
         const parsed = JSON.parse(stored);
         // 只加载非空数组
         if (Array.isArray(parsed) && parsed.length > 0) {
-          this.logs = parsed;
-        } else {
-          this.logs = [];
+          // 将加载的日志与现有日志合并，避免丢失
+          this.logs = [...parsed, ...this.logs];
+          // 确保不超过最大日志数量
+          if (this.logs.length > this.maxLogs) {
+            this.logs = this.logs.slice(-this.maxLogs);
+          }
         }
-      } else {
-        this.logs = [];
       }
       this.logsLoaded = true;
+      console.log(`日志加载完成: ${this.logs.length} 条记录`);
     } catch (error) {
-      console.warn("加载日志失败:", error);
-      this.logs = [];
+      console.error("加载日志失败:", error);
       this.logsLoaded = true; // 即使失败也标记为已加载，避免重复尝试
     }
   }
