@@ -80,19 +80,10 @@ const DraggableUnit = ({
 
   const panGesture = Gesture.Pan()
     .onStart(() => {
-      withJS(logDebug)("Gesture", `拖动手势开始 - 单元: ${unit.name}`, {
-        unitId: unit.id,
-        levelId,
-        levelName,
-      });
       translateY.value = 0;
     })
     .onUpdate((e) => {
       translateY.value = e.translationY;
-      withJS(logDebug)("Gesture", `拖动手势更新 - 单元: ${unit.name}`, {
-        translationY: e.translationY,
-        velocityY: e.velocityY,
-      });
     })
     .onEnd((e) => {
       const translationY = e.translationY;
@@ -227,10 +218,6 @@ const DraggableLevel = ({
 
   const panGesture = Gesture.Pan()
     .onStart(() => {
-      withJS(logInfo)("LevelSort", `层级拖拽开始 - ${level.name}`, {
-        levelId: level.id,
-        index,
-      });
       translateY.value = 0;
       offsetY.value = 0;
       opacity.value = 0.8;
@@ -243,10 +230,6 @@ const DraggableLevel = ({
     })
     .onUpdate((e) => {
       translateY.value = e.translationY;
-      withJS(logDebug)("LevelSort", `层级拖拽更新 - ${level.name}`, {
-        translationY: e.translationY,
-        velocityY: e.velocityY,
-      });
       try {
         withJS(onDragUpdate)(index, e.translationY);
       } catch (error) {

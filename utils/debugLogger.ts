@@ -91,7 +91,7 @@ class DebugLogger {
     data?: any,
     error?: Error
   ) {
-    if (!this.isEnabled) return;
+    if (!this.isEnabled && level !== "error") return;
 
     let safeData: any = undefined;
     if (typeof data !== "undefined") {
