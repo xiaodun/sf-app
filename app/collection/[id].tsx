@@ -66,30 +66,6 @@ const DraggableUnit = ({
 }) => {
   const translateY = useSharedValue(0);
   const DRAG_THRESHOLD = 30; // 拖拽阈值
-  const lastPressTime = React.useRef<number>(0);
-  const DOUBLE_PRESS_DELAY = 300; // 双击检测延迟
-
-  // 自定义双击检测逻辑
-  const handlePress = () => {
-    const currentTime = Date.now();
-    const timeSinceLastPress = currentTime - lastPressTime.current;
-    
-    if (timeSinceLastPress < DOUBLE_PRESS_DELAY) {
-      // 双击
-      logInfo("Gesture", `双击手势触发 - 单元: ${unit.name}`, {
-        unitId: unit.id,
-        levelId,
-        levelName,
-      });
-      try {
-        onDoublePress();
-      } catch (error) {
-        logError("Gesture", "双击处理失败", { unitId: unit.id }, error as Error);
-      }
-    }
-    
-    lastPressTime.current = currentTime;
-  };
 
   const panGesture = Gesture.Pan()
     .onStart(() => {
@@ -140,6 +116,25 @@ const DraggableUnit = ({
     })
     .minDistance(10);
 
+  // 添加双击手势
+  const tapGesture = Gesture.Tap()
+    .numberOfTaps(2)
+    .onEnd(() => {
+      logInfo("Gesture", `双击单元 - 单元: ${unit.name}`, {
+        unitId: unit.id,
+        levelId,
+        levelName,
+      });
+      try {
+        onDoublePress();
+      } catch (error) {
+        logError("Gesture", "双击处理失败", { unitId: unit.id }, error as Error);
+      }
+    });
+
+  // 同时处理拖动和双击手势
+  const composedGesture = Gesture.Simultaneous(panGesture, tapGesture);
+
   const animatedStyle = useAnimatedStyle(() => {
     return {
       transform: [{ translateY: translateY.value }],
@@ -147,13 +142,11 @@ const DraggableUnit = ({
   });
 
   return (
-    <Pressable onPress={handlePress} style={{ flex: 1 }}>
-      <GestureDetector gesture={panGesture}>
-        <Animated.View style={[styles.unitItem, animatedStyle]}>
-          <ThemedText style={styles.unitName}>{unit.name}</ThemedText>
-        </Animated.View>
-      </GestureDetector>
-    </Pressable>
+    <GestureDetector gesture={composedGesture}>
+      <Animated.View style={[styles.unitItem, animatedStyle]}>
+        <ThemedText style={styles.unitName}>{unit.name}</ThemedText>
+      </Animated.View>
+    </GestureDetector>
   );
 };
 
@@ -756,6 +749,8 @@ export default function CollectionDetailScreen() {
       name: isNumeric
         ? `${nextIndex + 1}` // 数字标识：1, 2, 3...
         : String.fromCharCode(65 + nextIndex), // 英文标识：A, B, C...
+      status: "normal",
+      features: [],
     };
     setModalUnits((prev) => [...prev, newUnit]);
   };
@@ -1477,9 +1472,6 @@ export default function CollectionDetailScreen() {
                                     unit={unit}
                                     levelId={level.id}
                                     levelName={level.name}
-                                    onDoublePress={() =>
-                                      handleUnitDoublePress(unit)
-                                    }
                                     onMoveToRecommend={() => {
                                       // 不删除单元，只添加到推荐列表
                                       setRecommendedUnits((prev) => {
@@ -1521,6 +1513,9 @@ export default function CollectionDetailScreen() {
                                           },
                                         ];
                                       });
+                                    }}
+                                    onDoublePress={() => {
+                                      handleUnitDoublePress(unit, level.name, level.id);
                                     }}
                                   />
                                 ))}

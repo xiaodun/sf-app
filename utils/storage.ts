@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { UnitStatus, UnitFeatureValue } from "../types/dataStructure";
 
 const COLLECTIONS_KEY = "@sf_app:collections";
 const LEVELS_KEY = "@sf_app:levels";
@@ -31,6 +32,10 @@ export interface Collection {
 export interface Unit {
   id: string;
   name: string;
+  status: UnitStatus;
+  features: UnitFeatureValue[];
+  favoriteReason?: string;
+  favoriteCreatedAt?: number;
 }
 
 export interface Level {
