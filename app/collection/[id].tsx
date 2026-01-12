@@ -1,29 +1,29 @@
+import { logDebug, logError, logInfo } from "@/utils/debugLogger";
 import * as Haptics from "expo-haptics";
 import {
-  Stack,
-  useFocusEffect,
-  useLocalSearchParams,
-  useRouter,
+    Stack,
+    useFocusEffect,
+    useLocalSearchParams,
+    useRouter,
 } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
-import { debugLogger, logError, logInfo, logWarn, logDebug } from "@/utils/debugLogger";
 import {
-  Alert,
-  Dimensions,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  View,
+    Alert,
+    Dimensions,
+    Modal,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
+    useAnimatedStyle,
+    useSharedValue,
+    withSpring,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -32,13 +32,13 @@ import { ThemedView } from "@/components/ThemedView";
 import { useUnifiedData } from "@/hooks/useUnifiedData";
 import { DataAdapter } from "@/utils/dataAdapter";
 import {
-  FavoriteUnit,
-  Feature,
-  Level,
-  RecommendedUnit,
-  TrashedUnit,
-  Unit,
-  UnitFeature,
+    FavoriteUnit,
+    Feature,
+    Level,
+    RecommendedUnit,
+    TrashedUnit,
+    Unit,
+    UnitFeature,
 } from "@/utils/storage";
 import { MaterialIcons } from "@expo/vector-icons";
 
@@ -66,18 +66,16 @@ const DraggableUnit = ({
 }) => {
   const translateY = useSharedValue(0);
   const DRAG_THRESHOLD = 30; // 拖拽阈值
+  const lastPressTime = React.useRef<number>(0);
+  const DOUBLE_PRESS_DELAY = 300; // 双击检测延迟
 
-  const tapGesture = Gesture.Tap()
-    .numberOfTaps(2)
-    .maxDuration(300)
-    .onBegin(() => {
-      logDebug("Gesture", `双击手势开始 - 单元: ${unit.name}`, {
-        unitId: unit.id,
-        levelId,
-        levelName,
-      });
-    })
-    .onEnd(() => {
+  // 自定义双击检测逻辑
+  const handlePress = () => {
+    const currentTime = Date.now();
+    const timeSinceLastPress = currentTime - lastPressTime.current;
+    
+    if (timeSinceLastPress < DOUBLE_PRESS_DELAY) {
+      // 双击
       logInfo("Gesture", `双击手势触发 - 单元: ${unit.name}`, {
         unitId: unit.id,
         levelId,
@@ -88,10 +86,10 @@ const DraggableUnit = ({
       } catch (error) {
         logError("Gesture", "双击处理失败", { unitId: unit.id }, error as Error);
       }
-    })
-    .onFinalize(() => {
-      logDebug("Gesture", `双击手势结束 - 单元: ${unit.name}`);
-    });
+    }
+    
+    lastPressTime.current = currentTime;
+  };
 
   const panGesture = Gesture.Pan()
     .onStart(() => {
@@ -142,8 +140,6 @@ const DraggableUnit = ({
     })
     .minDistance(10);
 
-  const composedGesture = Gesture.Simultaneous(panGesture, tapGesture);
-
   const animatedStyle = useAnimatedStyle(() => {
     return {
       transform: [{ translateY: translateY.value }],
@@ -151,11 +147,13 @@ const DraggableUnit = ({
   });
 
   return (
-    <GestureDetector gesture={composedGesture}>
-      <Animated.View style={[styles.unitItem, animatedStyle]}>
-        <ThemedText style={styles.unitName}>{unit.name}</ThemedText>
-      </Animated.View>
-    </GestureDetector>
+    <Pressable onPress={handlePress} style={{ flex: 1 }}>
+      <GestureDetector gesture={panGesture}>
+        <Animated.View style={[styles.unitItem, animatedStyle]}>
+          <ThemedText style={styles.unitName}>{unit.name}</ThemedText>
+        </Animated.View>
+      </GestureDetector>
+    </Pressable>
   );
 };
 
