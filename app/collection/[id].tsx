@@ -68,12 +68,11 @@ const InteractiveUnit = ({
   const translateY = useSharedValue(0);
   const DRAG_THRESHOLD = 50;
 
-  // 拖动手势：仅处理 UI 动画，逻辑回调放在 onEnd
+  // 拖动手势：引入长按激活机制，解决与 ScrollView 的冲突
   const panGesture = Gesture.Pan()
-    .minDistance(10)
+    .activateAfterLongPress(200) // 长按 200ms 后激活，区分"滚动"和"拖动"
     .hitSlop({ top: 10, bottom: 10, left: 10, right: 10 }) // 扩大手势识别范围
-    .activeOffsetY([-10, 10]) // 明确垂直拖动意图，避免与 ScrollView 冲突
-    .failOffsetX([-50, 50]) // 放宽横向移动限制，提高灵敏度
+    .failOffsetX([-50, 50]) // 放宽横向移动限制
     .onStart(() => {
       translateY.value = 0;
     })
@@ -1064,26 +1063,10 @@ export default function CollectionDetailScreen() {
         const temp = newLevels[index];
         newLevels[index] = newLevels[index - 1];
         newLevels[index - 1] = temp;
-
-        // 异步保存数据
-        setTimeout(() => {
-          const collectionIndex = dataManager.getCollectionIndexById(id);
-          if (collectionIndex !== -1) {
-            const collection = dataManager.getCollection(collectionIndex);
-            if (collection) {
-              dataManager.updateCollection(collectionIndex, {
-                ...collection,
-                levels: newLevels,
-              });
-              updateData().catch((err) => console.error("保存排序失败", err));
-            }
-          }
-        }, 0);
-
         return newLevels;
       });
     },
-    [id, dataManager, updateData]
+    [id]
   );
 
   // 处理层级下移
@@ -1096,26 +1079,10 @@ export default function CollectionDetailScreen() {
         const temp = newLevels[index];
         newLevels[index] = newLevels[index + 1];
         newLevels[index + 1] = temp;
-
-        // 异步保存数据
-        setTimeout(() => {
-          const collectionIndex = dataManager.getCollectionIndexById(id);
-          if (collectionIndex !== -1) {
-            const collection = dataManager.getCollection(collectionIndex);
-            if (collection) {
-              dataManager.updateCollection(collectionIndex, {
-                ...collection,
-                levels: newLevels,
-              });
-              updateData().catch((err) => console.error("保存排序失败", err));
-            }
-          }
-        }, 0);
-
         return newLevels;
       });
     },
-    [levels.length, id, dataManager, updateData]
+    [levels.length, id]
   );
 
   // 退出排序模式
