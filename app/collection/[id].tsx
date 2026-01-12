@@ -357,7 +357,14 @@ export default function CollectionDetailScreen() {
 
   // 同步数据到统一数据结构
   useEffect(() => {
-    if (!loading && !dataLoading && id && !isUpdatingRef.current) {
+    // 在排序模式下不进行自动保存，直到退出排序模式（点击完成）时才保存
+    if (
+      !loading &&
+      !dataLoading &&
+      id &&
+      !isUpdatingRef.current &&
+      !isSortingMode
+    ) {
       const collectionIndex = dataManager.getCollectionIndexById(id);
       if (collectionIndex === -1) return;
 
@@ -495,6 +502,7 @@ export default function CollectionDetailScreen() {
     loading,
     dataLoading,
     id,
+    isSortingMode,
   ]);
 
   const handleCreateLevel = () => {
