@@ -9,7 +9,10 @@
       "distribution": "internal"
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk" // 关键：强制输出APK，替换默认的ABB
+      }
     },
     "production": {
       "autoIncrement": true
