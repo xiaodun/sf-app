@@ -21,10 +21,10 @@ import {
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
-  runOnJS,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -71,8 +71,9 @@ const InteractiveUnit = ({
   // 拖动手势：仅处理 UI 动画，逻辑回调放在 onEnd
   const panGesture = Gesture.Pan()
     .minDistance(10)
+    .hitSlop({ top: 10, bottom: 10, left: 10, right: 10 }) // 扩大手势识别范围
     .activeOffsetY([-10, 10]) // 明确垂直拖动意图，避免与 ScrollView 冲突
-    .failOffsetX([-20, 20]) // 如果横向移动过多，则判定失败，交给 ScrollView 或其他手势
+    .failOffsetX([-50, 50]) // 放宽横向移动限制，提高灵敏度
     .onStart(() => {
       translateY.value = 0;
     })
@@ -107,6 +108,7 @@ const InteractiveUnit = ({
   const tapGesture = Gesture.Tap()
     .numberOfTaps(2)
     .maxDistance(20)
+    .hitSlop({ top: 10, bottom: 10, left: 10, right: 10 }) // 扩大手势识别范围
     .onEnd(() => {
       "worklet";
       runOnJS(logInfo)("Gesture", `双击单元 - 单元: ${unit.name}`);
@@ -124,38 +126,67 @@ const InteractiveUnit = ({
 
   return (
     <GestureDetector gesture={composedGesture}>
-      <Animated.View style={[styles.unitItem, animatedStyle]}>
+      <Animated.View 
+        style={[styles.unitItem, animatedStyle]}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      >
         <ThemedText style={styles.unitName}>{unit.name}</ThemedText>
       </Animated.View>
     </GestureDetector>
   );
 };
 
-// 排序层级组件（暂时移除拖拽功能以确保稳定性）
-const DraggableLevel = ({
+// 排序层级组件（点击按钮排序）
+const SortableLevelItem = ({
   level,
   index,
-  onDragStart,
-  onDragEnd,
-  onDragUpdate,
-  draggedIndex,
-  dragTranslationY,
-  itemHeight,
+  isFirst,
+  isLast,
+  onMoveUp,
+  onMoveDown,
 }: {
   level: Level;
   index: number;
-  onDragStart: (index: number) => void;
-  onDragEnd: (fromIndex: number, toIndex: number) => void;
-  onDragUpdate: (fromIndex: number, translationY: number) => void;
-  draggedIndex: number | null;
-  dragTranslationY: number;
-  itemHeight: number;
+  isFirst: boolean;
+  isLast: boolean;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
 }) => {
-  // 暂时移除手势交互，仅展示
   return (
     <View style={styles.sortableLevelItem}>
-      <MaterialIcons name="drag-handle" size={24} color="#CCCCCC" />
       <ThemedText style={styles.sortableLevelName}>{level.name}</ThemedText>
+      <View style={styles.sortableLevelActions}>
+        <Pressable
+          style={[
+            styles.sortActionButton,
+            isFirst && styles.sortActionButtonDisabled,
+          ]}
+          onPress={onMoveUp}
+          disabled={isFirst}
+          hitSlop={10}
+        >
+          <MaterialIcons 
+            name="keyboard-arrow-up" 
+            size={28} 
+            color={isFirst ? "#CCCCCC" : "#007AFF"} 
+          />
+        </Pressable>
+        <Pressable
+          style={[
+            styles.sortActionButton,
+            isLast && styles.sortActionButtonDisabled,
+          ]}
+          onPress={onMoveDown}
+          disabled={isLast}
+          hitSlop={10}
+        >
+          <MaterialIcons 
+            name="keyboard-arrow-down" 
+            size={28} 
+            color={isLast ? "#CCCCCC" : "#007AFF"} 
+          />
+        </Pressable>
+      </View>
     </View>
   );
 };
@@ -224,9 +255,6 @@ export default function CollectionDetailScreen() {
   const [unitNameError, setUnitNameError] = useState<string>("");
   const [levelNameError, setLevelNameError] = useState("");
   const [isSortingMode, setIsSortingMode] = useState(false);
-  const [draggedLevelIndex, setDraggedLevelIndex] = useState<number | null>(
-    null
-  );
 
   // 加载集合信息
   useEffect(() => {
@@ -1026,40 +1054,20 @@ export default function CollectionDetailScreen() {
     setFavoriteReason("");
   };
 
-  const [dragTranslationY, setDragTranslationY] = useState(0);
+  // 处理层级上移
+  const handleMoveLevelUp = useCallback(
+    (index: number) => {
+      if (index <= 0 || !id) return;
 
-  // 处理层次拖拽开始
-  const handleLevelDragStart = (index: number) => {
-    setDraggedLevelIndex(index);
-    setDragTranslationY(0);
-  };
+      setLevels((prev) => {
+        const newLevels = [...prev];
+        const temp = newLevels[index];
+        newLevels[index] = newLevels[index - 1];
+        newLevels[index - 1] = temp;
 
-  // 处理层次拖拽更新
-  const handleLevelDragUpdate = useCallback(
-    (fromIndex: number, translationY: number) => {
-      setDragTranslationY(translationY);
-    },
-    []
-  );
-
-  // 处理层次拖拽结束
-  const handleLevelDragEnd = useCallback(
-    (fromIndex: number, toIndex: number) => {
-      setDraggedLevelIndex(null);
-      setDragTranslationY(0);
-      const maxIndex = levels.length - 1;
-      const validToIndex = Math.max(0, Math.min(toIndex, maxIndex));
-
-      if (fromIndex !== validToIndex && id) {
-        setLevels((prev) => {
-          const newLevels = [...prev];
-          const [movedLevel] = newLevels.splice(fromIndex, 1);
-          newLevels.splice(validToIndex, 0, movedLevel);
-
-          // 更新dataManager
-          const collectionIndex = dataManager
-            .getCollections()
-            .findIndex((c) => c.id === id);
+        // 异步保存数据
+        setTimeout(() => {
+          const collectionIndex = dataManager.getCollectionIndexById(id);
           if (collectionIndex !== -1) {
             const collection = dataManager.getCollection(collectionIndex);
             if (collection) {
@@ -1067,22 +1075,52 @@ export default function CollectionDetailScreen() {
                 ...collection,
                 levels: newLevels,
               });
-              // 异步保存
-              updateData();
+              updateData().catch((err) => console.error("保存排序失败", err));
             }
           }
+        }, 0);
 
-          return newLevels;
-        });
-      }
+        return newLevels;
+      });
     },
-    [levels, id, dataManager, updateData]
+    [id, dataManager, updateData]
+  );
+
+  // 处理层级下移
+  const handleMoveLevelDown = useCallback(
+    (index: number) => {
+      if (index >= levels.length - 1 || !id) return;
+
+      setLevels((prev) => {
+        const newLevels = [...prev];
+        const temp = newLevels[index];
+        newLevels[index] = newLevels[index + 1];
+        newLevels[index + 1] = temp;
+
+        // 异步保存数据
+        setTimeout(() => {
+          const collectionIndex = dataManager.getCollectionIndexById(id);
+          if (collectionIndex !== -1) {
+            const collection = dataManager.getCollection(collectionIndex);
+            if (collection) {
+              dataManager.updateCollection(collectionIndex, {
+                ...collection,
+                levels: newLevels,
+              });
+              updateData().catch((err) => console.error("保存排序失败", err));
+            }
+          }
+        }, 0);
+
+        return newLevels;
+      });
+    },
+    [levels.length, id, dataManager, updateData]
   );
 
   // 退出排序模式
   const handleExitSortingMode = () => {
     setIsSortingMode(false);
-    setDraggedLevelIndex(null);
   };
 
   // Stack.Screen 必须在组件顶层，确保始终渲染
@@ -1284,16 +1322,14 @@ export default function CollectionDetailScreen() {
                     ) : (
                       <>
                         {levels.map((level, index) => (
-                          <DraggableLevel
+                          <SortableLevelItem
                             key={level.id}
                             level={level}
                             index={index}
-                            onDragStart={handleLevelDragStart}
-                            onDragEnd={handleLevelDragEnd}
-                            onDragUpdate={handleLevelDragUpdate}
-                            draggedIndex={draggedLevelIndex}
-                            dragTranslationY={dragTranslationY}
-                            itemHeight={60}
+                            isFirst={index === 0}
+                            isLast={index === levels.length - 1}
+                            onMoveUp={() => handleMoveLevelUp(index)}
+                            onMoveDown={() => handleMoveLevelDown(index)}
                           />
                         ))}
                       </>
@@ -2452,6 +2488,7 @@ const styles = StyleSheet.create({
   unitItem: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     backgroundColor: "#F5F5F5",
     paddingHorizontal: 16,
     paddingVertical: 10,
