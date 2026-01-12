@@ -119,6 +119,8 @@ const DraggableUnit = ({
   // 添加双击手势
   const tapGesture = Gesture.Tap()
     .numberOfTaps(2)
+    .maxDistance(12)
+    .maxDuration(250)
     .onEnd(() => {
       logInfo("Gesture", `双击单元 - 单元: ${unit.name}`, {
         unitId: unit.id,
@@ -132,8 +134,8 @@ const DraggableUnit = ({
       }
     });
 
-  // 同时处理拖动和双击手势
-  const composedGesture = Gesture.Simultaneous(panGesture, tapGesture);
+  // 双击与拖动互斥：优先识别双击，失败后识别拖动
+  const composedGesture = Gesture.Exclusive(tapGesture, panGesture);
 
   const animatedStyle = useAnimatedStyle(() => {
     return {

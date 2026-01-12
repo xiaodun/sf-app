@@ -24,7 +24,7 @@ class DebugLogger {
   private logs: LogEntry[] = [];
   private maxLogs = 1000; // 最多保存1000条日志
   private storageKey = "@sf_app_debug_logs";
-  private isEnabled = __DEV__ || true; // 生产环境也启用
+  private isEnabled = __DEV__;
   private logsLoaded = false; // 标记是否已加载过日志
 
   constructor() {
@@ -93,33 +93,52 @@ class DebugLogger {
   ) {
     if (!this.isEnabled) return;
 
+    let safeData: any = undefined;
+    if (typeof data !== "undefined") {
+      try {
+        safeData = JSON.parse(JSON.stringify(data));
+      } catch (e) {
+        safeData = {
+          original: String(data),
+          serializationError:
+            e instanceof Error ? e.message : "unknown serialization error",
+        };
+      }
+    }
+
     const entry: LogEntry = {
       timestamp: new Date().toISOString(),
       level,
       category,
       message,
-      data: data ? JSON.parse(JSON.stringify(data)) : undefined,
+      data: safeData,
       stack: error?.stack,
     };
 
-    this.logs.push(entry);
-    this.saveLogs();
+    try {
+      this.logs.push(entry);
+    } catch {}
+    try {
+      this.saveLogs();
+    } catch {}
 
     // 同时输出到控制台
     const logMessage = `[${category}] ${message}`;
-    switch (level) {
-      case "error":
-        console.error(logMessage, data || error);
-        break;
-      case "warn":
-        console.warn(logMessage, data);
-        break;
-      case "debug":
-        console.log(logMessage, data);
-        break;
-      default:
-        console.log(logMessage, data);
-    }
+    try {
+      switch (level) {
+        case "error":
+          console.error(logMessage, safeData || error);
+          break;
+        case "warn":
+          console.warn(logMessage, safeData);
+          break;
+        case "debug":
+          console.log(logMessage, safeData);
+          break;
+        default:
+          console.log(logMessage, safeData);
+      }
+    } catch {}
   }
 
   info(category: string, message: string, data?: any) {
