@@ -1,29 +1,30 @@
-import { logDebug, logError, logInfo } from "@/utils/debugLogger";
+import { logError, logInfo } from "@/utils/debugLogger";
 import * as Haptics from "expo-haptics";
 import {
-    Stack,
-    useFocusEffect,
-    useLocalSearchParams,
-    useRouter,
+  Stack,
+  useFocusEffect,
+  useLocalSearchParams,
+  useRouter,
 } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
-    Alert,
-    Dimensions,
-    Modal,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  Dimensions,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
-    useAnimatedStyle,
-    useSharedValue,
-    withSpring
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  runOnJS,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -32,26 +33,15 @@ import { ThemedView } from "@/components/ThemedView";
 import { useUnifiedData } from "@/hooks/useUnifiedData";
 import { DataAdapter } from "@/utils/dataAdapter";
 import {
-    FavoriteUnit,
-    Feature,
-    Level,
-    RecommendedUnit,
-    TrashedUnit,
-    Unit,
-    UnitFeature,
+  FavoriteUnit,
+  Feature,
+  Level,
+  RecommendedUnit,
+  TrashedUnit,
+  Unit,
+  UnitFeature,
 } from "@/utils/storage";
 import { MaterialIcons } from "@expo/vector-icons";
-
-const withJS = <T extends (...args: any[]) => any>(fn: T) => {
-  return (...args: Parameters<T>) => {
-    // @ts-ignore
-    if (typeof runOnJS === "function") {
-      // @ts-ignore
-      return runOnJS(fn)(...args);
-    }
-    return fn(...args);
-  };
-};
 
 interface Collection {
   id: string;
@@ -59,8 +49,8 @@ interface Collection {
   createdAt: number;
 }
 
-// 可拖拽单元组件
-const DraggableUnit = ({
+// 可交互单元组件（恢复手势功能，使用稳健的实现方式）
+const InteractiveUnit = ({
   unit,
   levelId,
   levelName,
@@ -76,68 +66,55 @@ const DraggableUnit = ({
   onDoublePress: () => void;
 }) => {
   const translateY = useSharedValue(0);
-  const DRAG_THRESHOLD = 30; // 拖拽阈值
+  const DRAG_THRESHOLD = 50;
 
+  // 拖动手势：仅处理 UI 动画，逻辑回调放在 onEnd
   const panGesture = Gesture.Pan()
+    .minDistance(10)
+    .activeOffsetY([-10, 10]) // 明确垂直拖动意图，避免与 ScrollView 冲突
+    .failOffsetX([-20, 20]) // 如果横向移动过多，则判定失败，交给 ScrollView 或其他手势
     .onStart(() => {
       translateY.value = 0;
     })
     .onUpdate((e) => {
+      "worklet";
       translateY.value = e.translationY;
     })
     .onEnd((e) => {
+      "worklet";
       const translationY = e.translationY;
-      withJS(logInfo)("Gesture", `拖动手势结束 - 单元: ${unit.name}`, {
-        translationY,
-        velocityY: e.velocityY,
-        threshold: DRAG_THRESHOLD,
-      });
       
-      try {
-        if (translationY < -DRAG_THRESHOLD) {
-          // 向上拖动，进入推荐
-          withJS(logInfo)("Gesture", `向上拖动到推荐 - 单元: ${unit.name}`);
-          withJS(onMoveToRecommend)();
-        } else if (translationY > DRAG_THRESHOLD) {
-          // 向下拖动，进入回收站
-          withJS(logInfo)("Gesture", `向下拖动到回收站 - 单元: ${unit.name}`);
-          withJS(onMoveToTrash)();
-        } else {
-          withJS(logDebug)("Gesture", `拖动距离不足，取消操作 - 单元: ${unit.name}`, {
-            translationY,
-            threshold: DRAG_THRESHOLD,
-          });
-        }
+      if (translationY < -DRAG_THRESHOLD) {
+        // 向上拖动 -> 推荐
+        runOnJS(logInfo)("Gesture", `向上拖动到推荐 - 单元: ${unit.name}`);
+        runOnJS(onMoveToRecommend)();
+      } else if (translationY > DRAG_THRESHOLD) {
+        // 向下拖动 -> 回收站
+        runOnJS(logInfo)("Gesture", `向下拖动到回收站 - 单元: ${unit.name}`);
+        runOnJS(onMoveToTrash)();
+      } else {
+        // 距离不足，回弹
         translateY.value = withSpring(0);
-      } catch (error) {
-        withJS(logError)("Gesture", "拖动处理失败", { unitId: unit.id, translationY }, error as Error);
       }
     })
     .onFinalize(() => {
-      withJS(logDebug)("Gesture", `拖动手势结束 - 单元: ${unit.name}`);
-    })
-    .minDistance(10);
-
-  // 添加双击手势
-  const tapGesture = Gesture.Tap()
-    .numberOfTaps(2)
-    .maxDistance(12)
-    .maxDuration(250)
-    .onEnd(() => {
-      withJS(logInfo)("Gesture", `双击单元 - 单元: ${unit.name}`, {
-        unitId: unit.id,
-        levelId,
-        levelName,
-      });
-      try {
-        withJS(onDoublePress)();
-      } catch (error) {
-        withJS(logError)("Gesture", "双击处理失败", { unitId: unit.id }, error as Error);
-      }
+      "worklet";
+      // 确保总是回弹（如果操作执行了，组件可能会卸载，这行也没影响；如果没卸载，就回弹）
+      translateY.value = withSpring(0);
     });
 
-  // 双击与拖动互斥：优先识别双击，失败后识别拖动
-  const composedGesture = Gesture.Exclusive(tapGesture, panGesture);
+  // 双击手势
+  const tapGesture = Gesture.Tap()
+    .numberOfTaps(2)
+    .maxDistance(20)
+    .onEnd(() => {
+      "worklet";
+      runOnJS(logInfo)("Gesture", `双击单元 - 单元: ${unit.name}`);
+      runOnJS(onDoublePress)();
+    });
+
+  // 组合手势：同时监听，利用距离限制互斥
+  const composedGesture = Gesture.Simultaneous(panGesture, tapGesture);
 
   const animatedStyle = useAnimatedStyle(() => {
     return {
@@ -154,7 +131,7 @@ const DraggableUnit = ({
   );
 };
 
-// 可拖拽排序的层次组件
+// 排序层级组件（暂时移除拖拽功能以确保稳定性）
 const DraggableLevel = ({
   level,
   index,
@@ -174,111 +151,12 @@ const DraggableLevel = ({
   dragTranslationY: number;
   itemHeight: number;
 }) => {
-  const translateY = useSharedValue(0);
-  const offsetY = useSharedValue(0);
-  const opacity = useSharedValue(1);
-  const scale = useSharedValue(1);
-  const isDragging = draggedIndex === index;
-  const totalItemHeight = itemHeight + 12; // item高度 + marginBottom
-
-  // 当拖拽位置变化时，更新其他项的偏移
-  // 只移动相邻的元素，其他元素不动
-  // 例如：1 2 3，拖动1向下
-  // - 当1的目标位置 >= 2的位置时，2需要向上移动到1的位置
-  // - 当1的目标位置 < 2的位置时，2不需要移动
-  React.useEffect(() => {
-    if (draggedIndex !== null && draggedIndex !== index) {
-      const targetIndex =
-        Math.round(dragTranslationY / totalItemHeight) + draggedIndex;
-
-      // 只处理相邻元素的交换
-      if (draggedIndex < index) {
-        // 被拖拽项在当前位置之前（向下拖动）
-        // 只有当目标位置 >= 当前项位置时，当前项才需要向上移动
-        if (targetIndex >= index) {
-          offsetY.value = withSpring(-totalItemHeight);
-        } else {
-          offsetY.value = withSpring(0);
-        }
-      } else if (draggedIndex > index) {
-        // 被拖拽项在当前位置之后（向上拖动）
-        // 只有当目标位置 <= 当前项位置时，当前项才需要向下移动
-        if (targetIndex <= index) {
-          offsetY.value = withSpring(totalItemHeight);
-        } else {
-          offsetY.value = withSpring(0);
-        }
-      } else {
-        offsetY.value = withSpring(0);
-      }
-    } else {
-      offsetY.value = withSpring(0);
-    }
-  }, [draggedIndex, dragTranslationY, index, totalItemHeight, offsetY]);
-
-  const panGesture = Gesture.Pan()
-    .onStart(() => {
-      translateY.value = 0;
-      offsetY.value = 0;
-      opacity.value = 0.8;
-      scale.value = 1.05;
-      try {
-        withJS(onDragStart)(index);
-      } catch (error) {
-        withJS(logError)("LevelSort", "拖拽开始处理失败", { levelId: level.id, index }, error as Error);
-      }
-    })
-    .onUpdate((e) => {
-      translateY.value = e.translationY;
-      try {
-        withJS(onDragUpdate)(index, e.translationY);
-      } catch (error) {
-        withJS(logError)("LevelSort", "拖拽更新处理失败", { levelId: level.id, index }, error as Error);
-      }
-    })
-    .onEnd(() => {
-      // 计算目标位置
-      const targetIndex =
-        Math.round(translateY.value / totalItemHeight) + index;
-      withJS(logInfo)("LevelSort", `层级拖拽结束 - ${level.name}`, {
-        fromIndex: index,
-        toIndex: targetIndex,
-        translationY: translateY.value,
-        totalItemHeight,
-      });
-      translateY.value = withSpring(0);
-      offsetY.value = withSpring(0);
-      opacity.value = withSpring(1);
-      scale.value = withSpring(1);
-      try {
-        withJS(onDragEnd)(index, targetIndex);
-      } catch (error) {
-        withJS(logError)("LevelSort", "拖拽结束处理失败", { levelId: level.id, index, targetIndex }, error as Error);
-      }
-    })
-    .onFinalize(() => {
-      withJS(logDebug)("LevelSort", `层级拖拽完成 - ${level.name}`);
-    })
-    .minDistance(5);
-
-  const animatedStyle = useAnimatedStyle(() => {
-    return {
-      transform: [
-        { translateY: isDragging ? translateY.value : offsetY.value },
-        { scale: scale.value },
-      ],
-      opacity: opacity.value,
-      zIndex: isDragging ? 1000 : 1,
-    };
-  });
-
+  // 暂时移除手势交互，仅展示
   return (
-    <GestureDetector gesture={panGesture}>
-      <Animated.View style={[styles.sortableLevelItem, animatedStyle]}>
-        <MaterialIcons name="drag-handle" size={24} color="#999999" />
-        <ThemedText style={styles.sortableLevelName}>{level.name}</ThemedText>
-      </Animated.View>
-    </GestureDetector>
+    <View style={styles.sortableLevelItem}>
+      <MaterialIcons name="drag-handle" size={24} color="#CCCCCC" />
+      <ThemedText style={styles.sortableLevelName}>{level.name}</ThemedText>
+    </View>
   );
 };
 
@@ -1476,7 +1354,7 @@ export default function CollectionDetailScreen() {
                                     !isUnitInTrash(unit.id)
                                 )
                                 .map((unit) => (
-                                  <DraggableUnit
+                                  <InteractiveUnit
                                     key={unit.id}
                                     unit={unit}
                                     levelId={level.id}
