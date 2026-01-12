@@ -23,7 +23,7 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
     useAnimatedStyle,
     useSharedValue,
-    withSpring,
+    withSpring
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -41,6 +41,17 @@ import {
     UnitFeature,
 } from "@/utils/storage";
 import { MaterialIcons } from "@expo/vector-icons";
+
+const withJS = <T extends (...args: any[]) => any>(fn: T) => {
+  return (...args: Parameters<T>) => {
+    // @ts-ignore
+    if (typeof runOnJS === "function") {
+      // @ts-ignore
+      return runOnJS(fn)(...args);
+    }
+    return fn(...args);
+  };
+};
 
 interface Collection {
   id: string;
@@ -69,7 +80,7 @@ const DraggableUnit = ({
 
   const panGesture = Gesture.Pan()
     .onStart(() => {
-      logDebug("Gesture", `拖动手势开始 - 单元: ${unit.name}`, {
+      withJS(logDebug)("Gesture", `拖动手势开始 - 单元: ${unit.name}`, {
         unitId: unit.id,
         levelId,
         levelName,
@@ -78,14 +89,14 @@ const DraggableUnit = ({
     })
     .onUpdate((e) => {
       translateY.value = e.translationY;
-      logDebug("Gesture", `拖动手势更新 - 单元: ${unit.name}`, {
+      withJS(logDebug)("Gesture", `拖动手势更新 - 单元: ${unit.name}`, {
         translationY: e.translationY,
         velocityY: e.velocityY,
       });
     })
     .onEnd((e) => {
       const translationY = e.translationY;
-      logInfo("Gesture", `拖动手势结束 - 单元: ${unit.name}`, {
+      withJS(logInfo)("Gesture", `拖动手势结束 - 单元: ${unit.name}`, {
         translationY,
         velocityY: e.velocityY,
         threshold: DRAG_THRESHOLD,
@@ -94,25 +105,25 @@ const DraggableUnit = ({
       try {
         if (translationY < -DRAG_THRESHOLD) {
           // 向上拖动，进入推荐
-          logInfo("Gesture", `向上拖动到推荐 - 单元: ${unit.name}`);
-          onMoveToRecommend();
+          withJS(logInfo)("Gesture", `向上拖动到推荐 - 单元: ${unit.name}`);
+          withJS(onMoveToRecommend)();
         } else if (translationY > DRAG_THRESHOLD) {
           // 向下拖动，进入回收站
-          logInfo("Gesture", `向下拖动到回收站 - 单元: ${unit.name}`);
-          onMoveToTrash();
+          withJS(logInfo)("Gesture", `向下拖动到回收站 - 单元: ${unit.name}`);
+          withJS(onMoveToTrash)();
         } else {
-          logDebug("Gesture", `拖动距离不足，取消操作 - 单元: ${unit.name}`, {
+          withJS(logDebug)("Gesture", `拖动距离不足，取消操作 - 单元: ${unit.name}`, {
             translationY,
             threshold: DRAG_THRESHOLD,
           });
         }
         translateY.value = withSpring(0);
       } catch (error) {
-        logError("Gesture", "拖动处理失败", { unitId: unit.id, translationY }, error as Error);
+        withJS(logError)("Gesture", "拖动处理失败", { unitId: unit.id, translationY }, error as Error);
       }
     })
     .onFinalize(() => {
-      logDebug("Gesture", `拖动手势结束 - 单元: ${unit.name}`);
+      withJS(logDebug)("Gesture", `拖动手势结束 - 单元: ${unit.name}`);
     })
     .minDistance(10);
 
@@ -122,15 +133,15 @@ const DraggableUnit = ({
     .maxDistance(12)
     .maxDuration(250)
     .onEnd(() => {
-      logInfo("Gesture", `双击单元 - 单元: ${unit.name}`, {
+      withJS(logInfo)("Gesture", `双击单元 - 单元: ${unit.name}`, {
         unitId: unit.id,
         levelId,
         levelName,
       });
       try {
-        onDoublePress();
+        withJS(onDoublePress)();
       } catch (error) {
-        logError("Gesture", "双击处理失败", { unitId: unit.id }, error as Error);
+        withJS(logError)("Gesture", "双击处理失败", { unitId: unit.id }, error as Error);
       }
     });
 
@@ -216,7 +227,7 @@ const DraggableLevel = ({
 
   const panGesture = Gesture.Pan()
     .onStart(() => {
-      logInfo("LevelSort", `层级拖拽开始 - ${level.name}`, {
+      withJS(logInfo)("LevelSort", `层级拖拽开始 - ${level.name}`, {
         levelId: level.id,
         index,
       });
@@ -225,28 +236,28 @@ const DraggableLevel = ({
       opacity.value = 0.8;
       scale.value = 1.05;
       try {
-        onDragStart(index);
+        withJS(onDragStart)(index);
       } catch (error) {
-        logError("LevelSort", "拖拽开始处理失败", { levelId: level.id, index }, error as Error);
+        withJS(logError)("LevelSort", "拖拽开始处理失败", { levelId: level.id, index }, error as Error);
       }
     })
     .onUpdate((e) => {
       translateY.value = e.translationY;
-      logDebug("LevelSort", `层级拖拽更新 - ${level.name}`, {
+      withJS(logDebug)("LevelSort", `层级拖拽更新 - ${level.name}`, {
         translationY: e.translationY,
         velocityY: e.velocityY,
       });
       try {
-        onDragUpdate(index, e.translationY);
+        withJS(onDragUpdate)(index, e.translationY);
       } catch (error) {
-        logError("LevelSort", "拖拽更新处理失败", { levelId: level.id, index }, error as Error);
+        withJS(logError)("LevelSort", "拖拽更新处理失败", { levelId: level.id, index }, error as Error);
       }
     })
     .onEnd(() => {
       // 计算目标位置
       const targetIndex =
         Math.round(translateY.value / totalItemHeight) + index;
-      logInfo("LevelSort", `层级拖拽结束 - ${level.name}`, {
+      withJS(logInfo)("LevelSort", `层级拖拽结束 - ${level.name}`, {
         fromIndex: index,
         toIndex: targetIndex,
         translationY: translateY.value,
@@ -257,13 +268,13 @@ const DraggableLevel = ({
       opacity.value = withSpring(1);
       scale.value = withSpring(1);
       try {
-        onDragEnd(index, targetIndex);
+        withJS(onDragEnd)(index, targetIndex);
       } catch (error) {
-        logError("LevelSort", "拖拽结束处理失败", { levelId: level.id, index, targetIndex }, error as Error);
+        withJS(logError)("LevelSort", "拖拽结束处理失败", { levelId: level.id, index, targetIndex }, error as Error);
       }
     })
     .onFinalize(() => {
-      logDebug("LevelSort", `层级拖拽完成 - ${level.name}`);
+      withJS(logDebug)("LevelSort", `层级拖拽完成 - ${level.name}`);
     })
     .minDistance(5);
 
@@ -805,38 +816,51 @@ export default function CollectionDetailScreen() {
     levelName?: string,
     levelId?: string
   ) => {
-    setEditingUnitId(unit.id);
-    setEditingUnitName(unit.name);
-    setUnitNameError("");
-    // 如果提供了层级信息（从推荐页面调用），直接使用
-    if (levelName && levelId) {
-      setCurrentUnitForFavorite({
-        unit,
-        levelName,
-        levelId,
-      });
-    } else {
-      // 否则从层级列表中查找
-      const level = levels.find((l) => l.units.some((u) => u.id === unit.id));
+    try {
+      if (!unit || !unit.id) {
+        Alert.alert("错误", "单元数据异常");
+        return;
+      }
+      setEditingUnitId(unit.id);
+      setEditingUnitName(unit.name || "");
+      setUnitNameError("");
+      if (levelName && levelId) {
+        setCurrentUnitForFavorite({
+          unit,
+          levelName,
+          levelId,
+        });
+        return;
+      }
+      const level =
+        levels.find((l) => l.units.some((u) => u.id === unit.id)) || null;
       if (level) {
         setCurrentUnitForFavorite({
           unit,
           levelName: level.name,
           levelId: level.id,
         });
-      } else {
-        // 如果找不到层级，尝试从推荐列表中查找
-        const recommendedItem = recommendedUnits.find(
-          (item) => item.unit.id === unit.id
-        );
-        if (recommendedItem) {
-          setCurrentUnitForFavorite({
-            unit,
-            levelName: recommendedItem.levelName,
-            levelId: recommendedItem.levelId,
-          });
-        }
+        return;
       }
+      const recommendedItem =
+        recommendedUnits.find((item) => item.unit.id === unit.id) || null;
+      if (recommendedItem) {
+        setCurrentUnitForFavorite({
+          unit,
+          levelName: recommendedItem.levelName,
+          levelId: recommendedItem.levelId,
+        });
+        return;
+      }
+      Alert.alert("错误", "无法定位该单元所属层级");
+    } catch (error) {
+      logError(
+        "UnitEdit",
+        "处理单元点击失败",
+        { unitId: unit?.id, levelName, levelId },
+        error as Error
+      );
+      Alert.alert("错误", "操作失败，请重试");
     }
   };
 
@@ -1557,13 +1581,23 @@ export default function CollectionDetailScreen() {
                               styles.unitRowContent,
                               pressed && styles.unitRowPressed,
                             ]}
-                            onPress={() =>
-                              handleUnitDoublePress(
-                                item.unit,
-                                item.levelName,
-                                item.levelId
-                              )
-                            }
+                            onPress={() => {
+                              try {
+                                handleUnitDoublePress(
+                                  item.unit,
+                                  item.levelName,
+                                  item.levelId
+                                );
+                              } catch (error) {
+                                logError(
+                                  "UnitEdit",
+                                  "推荐页点击失败",
+                                  { unitId: item.unit?.id },
+                                  error as Error
+                                );
+                                Alert.alert("错误", "操作失败，请重试");
+                              }
+                            }}
                           >
                             <View style={styles.unitRowContent}>
                               <ThemedText style={styles.unitRowText}>
