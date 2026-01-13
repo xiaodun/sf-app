@@ -1,50 +1,66 @@
-# Welcome to your Expo app 👋
+# SF App - Collection & Level Manager
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+开发时候使用web端，通过线上环境打包APK文件在安卓真机上运行过。
 
-## Get started
+这是一个基于 React Native (Expo) 开发的层级化集合管理应用。用户可以创建集合，并在集合中管理不同层级（Level）和单元（Unit），支持丰富的手势交互、特性自定义和数据导入导出。
 
-1. Install dependencies
+## 核心功能
 
+### 1. 集合管理 (Collection Management)
+- **创建与管理**：首页展示所有集合，支持新增和删除集合。
+- **数据持久化**：所有数据存储在本地，支持自动保存和状态同步。
+
+### 2. 层级与单元系统 (Level & Unit System)
+- **层级结构**：每个集合包含多个层级（Level），层级内包含多个单元（Unit）。
+- **单元编辑**：支持编辑单元名称。
+- **状态流转**：单元可以在“普通”、“推荐”、“回收站”和“收藏”状态间流转。
+
+### 3. 特性系统 (Features System)
+应用提供灵活的“特性”系统，允许用户为单元添加额外的属性维度：
+- **全局定义**：特性是全局共享的（Global），一旦创建，所有集合中的单元都可以使用。
+- **类型支持**：
+  - **数值型 (Numeric)**：适合记录分数、数量、等级等（如：评分、数量）。
+  - **单选型 (Single Choice)**：适合记录布尔状态（如：是否完成、是否拥有）。
+- **管理与应用**：
+  - 在首页点击“特性管理”可添加、编辑或删除全局特性。
+  - 在单元详情页或编辑弹窗中，可以为特定单元设置这些特性的具体值。
+
+### 4. 导入与导出 (Import & Export)
+为了方便数据备份、迁移和分享，应用提供了完整的 JSON 数据导入导出功能：
+- **导出数据**：
+  - 在首页点击菜单中的“导出”按钮。
+  - 系统会将当前应用内的**所有数据**（包括集合、层级、单元、特性、收藏记录等）打包成一个 JSON 字符串。
+  - 该字符串会自动复制到您的系统剪贴板，您可以将其粘贴到备忘录、微信或其他地方保存。
+- **导入数据**：
+  - 在首页点击菜单中的“导入”按钮。
+  - 将之前导出的 JSON 字符串粘贴到输入框中（或点击“从剪贴板粘贴”）。
+  - 系统会校验数据格式，验证通过后将覆盖当前应用数据，实现数据恢复。
+  - **注意**：导入操作会完全覆盖现有数据，请谨慎操作。
+
+### 5. 手势交互 (Interactive Gestures)
+为了提供流畅且防误触的操作体验，应用实现了定制化的手势系统：
+- **滑动操作**：
+  - **上滑**：将单元移动到“推荐”列表。
+  - **下滑**：将单元移动到“回收站”。
+- **双击操作**：
+  - 双击单元格可弹出编辑菜单。
+  - **修改名称**：可以快速修改当前单元的名称。
+  - **编辑特性**：可以设置单元的各项特性值（如评分、状态等）。
+  - **收藏/取消收藏**：可以一键收藏单元并添加收藏理由，或取消已有的收藏。
+
+### 6. 层级排序系统 (Level Sorting)
+- **排序模式**：点击右上角菜单进入排序模式。
+- **按钮排序**：通过点击单元格右侧的 **“上移”/“下移”箭头按钮** 调整层级顺序。
+
+## 安装与运行
+
+1. 安装依赖：
    ```bash
    npm install
    ```
 
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
-```
-
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+2. 启动应用：
+   - Web端启动：
+     ```bash
+     npm run web
+     ```
